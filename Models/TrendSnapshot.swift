@@ -26,6 +26,6 @@ struct TrendSnapshot: Equatable {
         sampleCount: 0,
         lastUpdated: .distantPast,
         dominantEmoji: "🙂",
-        feedback: "まだ記録が少ないね。思いついたタイミングで一言だけ残してみよう。"
+        feedback: "まだ記録がありません。今日の一言から始めてみましょう。"
     )
 }

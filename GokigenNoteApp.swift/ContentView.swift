@@ -4,12 +4,13 @@
 //
 //  Created by 丹内智弥 on 2025/11/19.
 //
-import Foundation
 import SwiftUI
-import Combine
+import UIKit
 
 struct ContentView: View {
     @StateObject private var vm = GokigenViewModel()
+    @State private var exportText: String = ""
+    @State private var isSharePresented = false
 
     var body: some View {
         NavigationStack {
@@ -29,6 +30,9 @@ struct ContentView: View {
             .navigationTitle("ごきげんノート")
             .navigationBarTitleDisplayMode(.inline)
             .overlay(toastOverlay, alignment: .bottom)
+        }
+        .sheet(isPresented: $isSharePresented) {
+            ShareSheet(activityItems: [exportText])
         }
     }
 
@@ -133,11 +137,19 @@ struct ContentView: View {
             .buttonStyle(.bordered)
             .accessibilityHint("いまの気持ちに近い例文を差し込みます")
 
-            Button(action: vm.buildEmpathyDraft) {
-                Text("言い換えをつくる")
-                    .frame(maxWidth: .infinity)
+            Button(action: { vm.buildEmpathyDraft() }) {
+                HStack {
+                    if vm.isLoadingEmpathy {
+                        ProgressView()
+                        Text("考え中…")
+                    } else {
+                        Text("言い換えをつくる")
+                    }
+                }
+                .frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
+            .disabled(vm.isLoadingEmpathy)
             .accessibilityHint("入力文をやさしく言い換えます")
         }
     }
@@ -148,7 +160,7 @@ struct ContentView: View {
                 Text("最近の記録")
                     .font(.headline)
                 if vm.recentEntries.isEmpty {
-                    Text("まだ記録がありません。今日の一言からはじめてみましょう。")
+                    Text("まだ記録がありません。今日の一言から始めてみましょう。")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 } else {
@@ -164,6 +176,15 @@ struct ContentView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .accessibilityHint("過去の記録一覧に移動します")
+
+                if !vm.recentEntries.isEmpty {
+                    Button(action: prepareExport) {
+                        Label("データを書き出す", systemImage: "square.and.arrow.up")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .accessibilityHint("記録をJSONとして共有します")
+                }
             }
         }
     }
@@ -176,6 +197,29 @@ struct ContentView: View {
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
         .shadow(color: Color.black.opacity(0.05), radius: 8, y: 4)
     }
+}
+
+// MARK: - Export Helpers
+
+private extension ContentView {
+    func prepareExport() {
+        guard let json = vm.exportEntriesJSON() else { return }
+        exportText = json
+        isSharePresented = true
+    }
+}
+
+struct ShareSheet: UIViewControllerRepresentable {
+    let activityItems: [Any]
+    var applicationActivities: [UIActivity]? = nil
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        let controller = UIActivityViewController(activityItems: activityItems, applicationActivities: applicationActivities)
+        controller.excludedActivityTypes = [.assignToContact]
+        return controller
+    }
+
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) { }
 }
 
 struct HistoryRow: View {

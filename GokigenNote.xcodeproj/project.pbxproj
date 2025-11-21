@@ -7,40 +7,12 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		A864052B2ECD0FF4005DD4B1 /* Mood.swift in Sources */ = {isa = PBXBuildFile; fileRef = A864051C2ECCF216005DD4B1 /* Mood.swift */; };
-		A864052C2ECD0FFC005DD4B1 /* Entry.swift in Sources */ = {isa = PBXBuildFile; fileRef = A864051D2ECCF253005DD4B1 /* Entry.swift */; };
-		A864052D2ECD1003005DD4B1 /* PromptProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = A864051E2ECCF299005DD4B1 /* PromptProvider.swift */; };
-		A864052E2ECD101B005DD4B1 /* EmpathyEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = A86405232ECCF355005DD4B1 /* EmpathyEngine.swift */; };
-		A864052F2ECD1022005DD4B1 /* Persistence.swift in Sources */ = {isa = PBXBuildFile; fileRef = A86405222ECCF350005DD4B1 /* Persistence.swift */; };
+		A86406162ED02F1D005DD4B1 /* GoogleGenerativeAI in Frameworks */ = {isa = PBXBuildFile; productRef = A86406152ED02F1D005DD4B1 /* GoogleGenerativeAI */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		A864050C2ECCE879005DD4B1 /* GokigenNote.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = GokigenNote.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		A864051C2ECCF216005DD4B1 /* Mood.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Mood.swift; sourceTree = "<group>"; };
-		A864051D2ECCF253005DD4B1 /* Entry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Entry.swift; sourceTree = "<group>"; };
-		A864051E2ECCF299005DD4B1 /* PromptProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PromptProvider.swift; sourceTree = "<group>"; };
-		A86405222ECCF350005DD4B1 /* Persistence.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Persistence.swift; sourceTree = "<group>"; };
-		A86405232ECCF355005DD4B1 /* EmpathyEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmpathyEngine.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
-
-/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		A86405D72ECE5EF1005DD4B1 /* Exceptions for "ViewModels" folder in "GokigenNote" target */ = {
-			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
-			membershipExceptions = (
-				GokigenViewModel.swift,
-				TrendSnapshot.swift,
-			);
-			target = A864050B2ECCE879005DD4B1 /* GokigenNote */;
-		};
-		A86405E02ECF0C69005DD4B1 /* Exceptions for "Views" folder in "GokigenNote" target */ = {
-			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
-			membershipExceptions = (
-				EntryDetailView.swift,
-				HistoryListView.swift,
-			);
-			target = A864050B2ECCE879005DD4B1 /* GokigenNote */;
-		};
-/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		A864050E2ECCE879005DD4B1 /* GokigenNoteApp.swift */ = {
@@ -48,24 +20,23 @@
 			path = GokigenNoteApp.swift;
 			sourceTree = "<group>";
 		};
-		A86405202ECCF307005DD4B1 /* New Folder */ = {
+		A864051A2ECCF1C0005DD4B1 /* Models */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			path = "New Folder";
+			path = Models;
+			sourceTree = "<group>";
+		};
+		A86405212ECCF31F005DD4B1 /* Services */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = Services;
 			sourceTree = "<group>";
 		};
 		A86405242ECCF3B6005DD4B1 /* ViewModels */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			exceptions = (
-				A86405D72ECE5EF1005DD4B1 /* Exceptions for "ViewModels" folder in "GokigenNote" target */,
-			);
 			path = ViewModels;
 			sourceTree = "<group>";
 		};
 		A86405272ECCF425005DD4B1 /* Views */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			exceptions = (
-				A86405E02ECF0C69005DD4B1 /* Exceptions for "Views" folder in "GokigenNote" target */,
-			);
 			path = Views;
 			sourceTree = "<group>";
 		};
@@ -76,6 +47,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A86406162ED02F1D005DD4B1 /* GoogleGenerativeAI in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -98,28 +70,8 @@
 			isa = PBXGroup;
 			children = (
 				A864050C2ECCE879005DD4B1 /* GokigenNote.app */,
-				A86405202ECCF307005DD4B1 /* New Folder */,
 			);
 			name = Products;
-			sourceTree = "<group>";
-		};
-		A864051A2ECCF1C0005DD4B1 /* Models */ = {
-			isa = PBXGroup;
-			children = (
-				A864051C2ECCF216005DD4B1 /* Mood.swift */,
-				A864051D2ECCF253005DD4B1 /* Entry.swift */,
-				A864051E2ECCF299005DD4B1 /* PromptProvider.swift */,
-			);
-			path = Models;
-			sourceTree = "<group>";
-		};
-		A86405212ECCF31F005DD4B1 /* Services */ = {
-			isa = PBXGroup;
-			children = (
-				A86405232ECCF355005DD4B1 /* EmpathyEngine.swift */,
-				A86405222ECCF350005DD4B1 /* Persistence.swift */,
-			);
-			path = Services;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -139,10 +91,14 @@
 			);
 			fileSystemSynchronizedGroups = (
 				A864050E2ECCE879005DD4B1 /* GokigenNoteApp.swift */,
-				A86405202ECCF307005DD4B1 /* New Folder */,
+				A864051A2ECCF1C0005DD4B1 /* Models */,
+				A86405212ECCF31F005DD4B1 /* Services */,
+				A86405242ECCF3B6005DD4B1 /* ViewModels */,
+				A86405272ECCF425005DD4B1 /* Views */,
 			);
 			name = GokigenNote;
 			packageProductDependencies = (
+				A86406152ED02F1D005DD4B1 /* GoogleGenerativeAI */,
 			);
 			productName = GokigenNote;
 			productReference = A864050C2ECCE879005DD4B1 /* GokigenNote.app */;
@@ -172,6 +128,9 @@
 			);
 			mainGroup = A86405032ECCE878005DD4B1;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				A86406142ED02F1D005DD4B1 /* XCRemoteSwiftPackageReference "generative-ai-swift" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = A864050D2ECCE879005DD4B1 /* Products */;
 			projectDirPath = "";
@@ -197,11 +156,6 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				A864052E2ECD101B005DD4B1 /* EmpathyEngine.swift in Sources */,
-				A864052C2ECD0FFC005DD4B1 /* Entry.swift in Sources */,
-				A864052D2ECD1003005DD4B1 /* PromptProvider.swift in Sources */,
-				A864052F2ECD1022005DD4B1 /* Persistence.swift in Sources */,
-				A864052B2ECD0FF4005DD4B1 /* Mood.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -415,6 +369,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		A86406142ED02F1D005DD4B1 /* XCRemoteSwiftPackageReference "generative-ai-swift" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/google-gemini/generative-ai-swift";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 0.5.6;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		A86406152ED02F1D005DD4B1 /* GoogleGenerativeAI */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A86406142ED02F1D005DD4B1 /* XCRemoteSwiftPackageReference "generative-ai-swift" */;
+			productName = GoogleGenerativeAI;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = A86405042ECCE879005DD4B1 /* Project object */;
 }

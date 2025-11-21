@@ -8,17 +8,17 @@
 import Foundation
 import SwiftUI
 import Combine
-@MainActor
 
 final class GokigenViewModel: ObservableObject {
     @Published var selectedMood: Mood = .neutral
     @Published var draftText: String = ""
-    @Published var currentPrompt: String = PromptProvider.random()
+    @Published var currentPrompt: String
     @Published private(set) var empathyDraft: String = ""
     @Published private(set) var nextStepDraft: String = ""
     @Published private(set) var entries: [Entry] = []
     @Published var lastSuccessMessage: String?
     @Published var lastErrorMessage: String?
+    @Published private(set) var isLoadingEmpathy: Bool = false
 
     private enum Copy {
         static let saveSuccess = "あなたの今が書き留められたよ。"
@@ -27,6 +27,9 @@ final class GokigenViewModel: ObservableObject {
     }
 
     private let persistence = Persistence.shared
+    private let geminiService = GeminiService()
+    private var lastGeminiSuccess: (text: String, response: EmpathyResponse)?
+    private var lastGeminiRequest: String?
     private let micExamples: [Mood: [String]] = [
         .veryHappy: [
             "今日は嬉しいことが続いて笑顔で過ごせた。",
@@ -50,8 +53,11 @@ final class GokigenViewModel: ObservableObject {
         ]
     ]
 
+    @MainActor
     init() {
-        entries = persistence.load().sorted { $0.date > $1.date }
+        // プロパティを明示的に初期化
+        self.currentPrompt = PromptProvider.random()
+        self.entries = persistence.load().sorted { $0.date > $1.date }
     }
 
     private var isDraftEmpty: Bool {
@@ -60,26 +66,70 @@ final class GokigenViewModel: ObservableObject {
 
     // MARK: - 入力補助
 
+    @MainActor
     func newPrompt() {
         currentPrompt = PromptProvider.random()
     }
 
+    @MainActor
     func insertMicExample() {
         guard isDraftEmpty, let sample = micExamples[selectedMood]?.randomElement() else { return }
         draftText = sample
     }
 
-    // MARK: - ルールベース言い換え
+    // MARK: - 言い換え生成
 
-    func buildEmpathyDraft() {
-        guard !isDraftEmpty else { return }
-        let (empathy, next) = EmpathyEngine.rewrite(original: draftText, mood: selectedMood)
-        empathyDraft = empathy
-        nextStepDraft = next
+    @MainActor
+    func buildEmpathyDraft(forceRefresh: Bool = false) {
+        let trimmed = draftText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            publishError(message: Copy.emptyDraft)
+            return
+        }
+
+        // まずローカルの言い換えを即時反映
+        let local = EmpathyEngine.rewrite(original: trimmed, mood: selectedMood)
+        empathyDraft = local.0
+        nextStepDraft = local.1
+
+        if !forceRefresh,
+           let cache = lastGeminiSuccess,
+           cache.text == trimmed {
+            empathyDraft = cache.response.empathy
+            nextStepDraft = cache.response.nextStep
+            return
+        }
+
+        if isLoadingEmpathy { return }
+
+        isLoadingEmpathy = true
+        lastGeminiRequest = trimmed
+
+        Task {
+            do {
+                let response = try await geminiService.generateEmpathy(for: trimmed)
+                await MainActor.run {
+                    guard self.lastGeminiRequest == trimmed else { return }
+                    self.empathyDraft = response.empathy
+                    self.nextStepDraft = response.nextStep
+                    self.lastGeminiSuccess = (text: trimmed, response: response)
+                    self.lastGeminiRequest = nil
+                    self.isLoadingEmpathy = false
+                }
+            } catch {
+                await MainActor.run {
+                    guard self.lastGeminiRequest == trimmed else { return }
+                    self.publishError(message: Copy.offlineFallback)
+                    self.lastGeminiRequest = nil
+                    self.isLoadingEmpathy = false
+                }
+            }
+        }
     }
 
     // MARK: - 保存 / 履歴
 
+    @MainActor
     func saveCurrentEntry() {
         let trimmed = draftText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
@@ -87,16 +137,20 @@ final class GokigenViewModel: ObservableObject {
             return
         }
 
-        if empathyDraft.isEmpty {
-            buildEmpathyDraft()
+        var empathy = empathyDraft
+        var next = nextStepDraft
+        if empathy.isEmpty || next.isEmpty {
+            let fallback = EmpathyEngine.rewrite(original: trimmed, mood: selectedMood)
+            empathy = fallback.0
+            next = fallback.1
         }
 
         let entry = Entry(
             date: Date(),
             mood: selectedMood,
             originalText: trimmed,
-            empathyText: empathyDraft,
-            nextStep: nextStepDraft
+            empathyText: empathy,
+            nextStep: next
         )
 
         withAnimation(.easeInOut) {
@@ -112,6 +166,7 @@ final class GokigenViewModel: ObservableObject {
         publishSuccess(message: Copy.saveSuccess)
     }
 
+    @MainActor
     func delete(at offsets: IndexSet) {
         withAnimation(.easeInOut) {
             entries.remove(atOffsets: offsets)
@@ -119,6 +174,7 @@ final class GokigenViewModel: ObservableObject {
         persistence.save(entries)
     }
 
+    @MainActor
     func move(from source: IndexSet, to destination: Int) {
         withAnimation(.easeInOut) {
             entries.move(fromOffsets: source, toOffset: destination)
@@ -163,7 +219,7 @@ final class GokigenViewModel: ObservableObject {
     var trendSummary: String {
         let latest = Array(entries.prefix(14))
         guard !latest.isEmpty else {
-            return "まだデータが少ないよ。1日の終わりに一言だけ書いてみよう。"
+            return "まだ記録がありません。今日の一言から始めてみましょう。"
         }
 
         let scores = latest.map { Double($0.mood.rawValue) }
@@ -211,5 +267,19 @@ final class GokigenViewModel: ObservableObject {
             feedback: feedback
         )
     }
-}
 
+    // MARK: - エクスポート
+
+    @MainActor
+    func exportEntriesJSON() -> String? {
+        guard !entries.isEmpty else { return nil }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+        encoder.dateEncodingStrategy = .iso8601
+        guard let data = try? encoder.encode(entries),
+              let json = String(data: data, encoding: .utf8) else {
+            return nil
+        }
+        return json
+    }
+}
