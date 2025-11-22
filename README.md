@@ -61,7 +61,28 @@ GokigenNote/
 
 1. [Google AI Studio](https://makersuite.google.com/app/apikey) でAPIキーを取得
 
-2. `Gemini-Info.plist` を作成：
+2. **方法1: 環境変数で設定（推奨）**
+
+Xcodeのスキームに環境変数を追加：
+
+- Xcode で `Product` → `Scheme` → `Edit Scheme...` を選択
+- `Run` → `Arguments` → `Environment Variables` に以下を追加：
+  - Name: `GEMINI_API_KEY`
+  - Value: 取得したAPIキー
+
+**または**
+
+- `.xcodeproj` を右クリック → Show in Finder
+- ターミナルで以下を実行：
+```bash
+cd /path/to/GokigenNote
+export GEMINI_API_KEY="your-api-key-here"
+open GokigenNote.xcodeproj
+```
+
+3. **方法2: plistファイルで設定**
+
+`Gemini-Info.plist` を作成：
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -73,9 +94,13 @@ GokigenNote/
 </plist>
 ```
 
-3. `.gitignore` にすでに追加済みなので、APIキーは安全です
+4. `.gitignore` にすでに追加済みなので、APIキーは安全です
 
 > **注意**: APIキーが未設定でも、ローカルの `EmpathyEngine` で動作します。
+> 
+> APIキーの読み込み優先順位:
+> 1. 環境変数 `GEMINI_API_KEY`
+> 2. `Gemini-Info.plist` ファイル
 
 ## 🚀 ビルド＆実行
 

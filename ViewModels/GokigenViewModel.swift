@@ -15,15 +15,18 @@ final class GokigenViewModel: ObservableObject {
     @Published var currentPrompt: String
     @Published private(set) var empathyDraft: String = ""
     @Published private(set) var nextStepDraft: String = ""
+    @Published private(set) var reformulatedText: String = ""
     @Published private(set) var entries: [Entry] = []
     @Published var lastSuccessMessage: String?
     @Published var lastErrorMessage: String?
     @Published private(set) var isLoadingEmpathy: Bool = false
+    @Published private(set) var isLoadingReformulation: Bool = false
 
     private enum Copy {
         static let saveSuccess = "あなたの今が書き留められたよ。"
         static let emptyDraft = "まず一言だけ書いてみませんか？"
         static let offlineFallback = "今は手元のアイデアで続けるね。"
+        static let reformulationError = "言い換えに失敗しました。もう一度お試しください。"
     }
 
     private let persistence = Persistence.shared
@@ -126,6 +129,35 @@ final class GokigenViewModel: ObservableObject {
             }
         }
     }
+    
+    // 言語化機能
+    @MainActor
+    func reformulateText() {
+        let trimmed = draftText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            publishError(message: Copy.emptyDraft)
+            return
+        }
+
+        if isLoadingReformulation { return }
+
+        isLoadingReformulation = true
+
+        Task {
+            do {
+                let reformulated = try await geminiService.reformulateText(for: trimmed)
+                await MainActor.run {
+                    self.reformulatedText = reformulated
+                    self.isLoadingReformulation = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.publishError(message: Copy.reformulationError)
+                    self.isLoadingReformulation = false
+                }
+            }
+        }
+    }
 
     // MARK: - 保存 / 履歴
 
@@ -162,6 +194,7 @@ final class GokigenViewModel: ObservableObject {
         selectedMood = .neutral
         empathyDraft = ""
         nextStepDraft = ""
+        reformulatedText = ""
         currentPrompt = PromptProvider.random()
         publishSuccess(message: Copy.saveSuccess)
     }

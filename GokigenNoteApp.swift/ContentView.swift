@@ -116,6 +116,23 @@ struct ContentView: View {
                         )
                         .accessibilityHint("感じたことを自由に入力できます")
                 }
+                
+                // 言語化された文章を表示
+                if !vm.reformulatedText.isEmpty {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Divider()
+                        Text("言い換え")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text(vm.reformulatedText)
+                            .font(.body)
+                            .padding()
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(Color(.tertiarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
+                    }
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+                }
+                
                 Button(action: vm.saveCurrentEntry) {
                     Text("この一言を記録する")
                         .frame(maxWidth: .infinity)
@@ -137,9 +154,9 @@ struct ContentView: View {
             .buttonStyle(.bordered)
             .accessibilityHint("いまの気持ちに近い例文を差し込みます")
 
-            Button(action: { vm.buildEmpathyDraft() }) {
+            Button(action: { vm.reformulateText() }) {
                 HStack {
-                    if vm.isLoadingEmpathy {
+                    if vm.isLoadingReformulation {
                         ProgressView()
                         Text("考え中…")
                     } else {
@@ -149,8 +166,8 @@ struct ContentView: View {
                 .frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
-            .disabled(vm.isLoadingEmpathy)
-            .accessibilityHint("入力文をやさしく言い換えます")
+            .disabled(vm.isLoadingReformulation || vm.draftText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            .accessibilityHint("入力文をより綺麗に言語化します")
         }
     }
 

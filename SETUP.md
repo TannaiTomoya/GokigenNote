@@ -35,7 +35,30 @@ open GokigenNote.xcodeproj
 
 [Google AI Studio](https://makersuite.google.com/app/apikey) にアクセスして、無料のAPIキーを取得します。
 
-#### 2. `Gemini-Info.plist` を作成
+#### 2. APIキーを設定（2つの方法）
+
+##### 方法A: 環境変数で設定（推奨）
+
+**Xcodeのスキーム設定から環境変数を追加：**
+
+1. Xcode で `Product` → `Scheme` → `Edit Scheme...` を選択
+2. 左側のメニューから `Run` を選択
+3. `Arguments` タブをクリック
+4. `Environment Variables` セクションで `+` ボタンをクリック
+5. 以下を追加：
+   - **Name**: `GEMINI_API_KEY`
+   - **Value**: 取得したAPIキー
+6. `Close` をクリック
+
+**または、ターミナルから起動：**
+
+```bash
+cd /Users/tannaitomoya/smift-camp/GokigenNote
+export GEMINI_API_KEY="your-api-key-here"
+open GokigenNote.xcodeproj
+```
+
+##### 方法B: plistファイルで設定
 
 プロジェクトルートに `Gemini-Info.plist` ファイルを作成します：
 
@@ -43,8 +66,6 @@ open GokigenNote.xcodeproj
 cd /Users/tannaitomoya/smift-camp/GokigenNote
 touch Gemini-Info.plist
 ```
-
-#### 3. APIキーを設定
 
 `Gemini-Info.plist` を開いて、以下の内容をペーストします：
 
@@ -60,10 +81,11 @@ touch Gemini-Info.plist
 ```
 
 > **⚠️ 重要**: 
+> - APIキーの読み込み優先順位: 1. 環境変数 → 2. plistファイル
 > - `Gemini-Info.plist` は `.gitignore` に含まれているため、Git にコミットされません
 > - APIキーは絶対に公開リポジトリにプッシュしないでください
 
-#### 4. ビルド＆実行
+#### 3. ビルド＆実行
 
 - **Clean Build**: ⌥⇧⌘K
 - **Run**: ⌘R
