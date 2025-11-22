@@ -83,13 +83,37 @@ final class GeminiService {
         3) ユーザーの意図を変えずに、より伝わりやすい表現にする
         4) 必要に応じて、曖昧な部分を補完する
         5) 文章を一つにまとめて、簡潔に表現する
+        6) ポジティブな表現を心がけながらも、ユーザーの本来の感情を尊重する
+        7) 200文字以内に収める
 
-        注意：説明や前置きは不要です。整形した文章だけを返してください。
+        【重要】説明や前置きは不要です。整形した文章だけを返してください。
+        【重要】「整形した文章：」などのラベルも不要です。文章のみを返してください。
         """
 
         let response = try await model.generateContent(prompt)
         logger.info("Text reformulation completed.")
-        let reformulatedText = response.text ?? text
+        var reformulatedText = response.text ?? text
+        
+        // 余計な接頭辞を削除
+        let unwantedPrefixes = [
+            "整形した文章：",
+            "整形した文章:",
+            "言い換え：",
+            "言い換え:",
+            "回答：",
+            "回答:",
+            "「",
+            "」"
+        ]
+        
+        for prefix in unwantedPrefixes {
+            if reformulatedText.hasPrefix(prefix) {
+                reformulatedText = String(reformulatedText.dropFirst(prefix.count))
+            }
+            if reformulatedText.hasSuffix(prefix) {
+                reformulatedText = String(reformulatedText.dropLast(prefix.count))
+            }
+        }
         
         return reformulatedText.trimmingCharacters(in: .whitespacesAndNewlines)
     }

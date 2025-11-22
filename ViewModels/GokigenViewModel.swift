@@ -31,6 +31,8 @@ final class GokigenViewModel: ObservableObject {
 
     private let persistence = Persistence.shared
     private let geminiService = GeminiService()
+    private let firestoreService = FirestoreService.shared
+    private var currentUserId: String?
     private var lastGeminiSuccess: (text: String, response: EmpathyResponse)?
     private var lastGeminiRequest: String?
     private let micExamples: [Mood: [String]] = [
@@ -61,6 +63,33 @@ final class GokigenViewModel: ObservableObject {
         // プロパティを明示的に初期化
         self.currentPrompt = PromptProvider.random()
         self.entries = persistence.load().sorted { $0.date > $1.date }
+    }
+    
+    func setUserId(_ userId: String?) {
+        self.currentUserId = userId
+        if let userId = userId {
+            loadEntriesFromFirestore(userId: userId)
+        }
+    }
+    
+    @MainActor
+    private func loadEntriesFromFirestore(userId: String) {
+        Task {
+            do {
+                print("📥 [GokigenViewModel] Firestoreから読み込み開始...")
+                let firestoreEntries = try await firestoreService.loadEntries(for: userId)
+                print("✅ [GokigenViewModel] Firestore読み込み成功: \(firestoreEntries.count)件")
+                
+                // 言い換えテキストの有無を確認
+                let withReformulation = firestoreEntries.filter { $0.reformulatedText != nil }.count
+                print("📝 [GokigenViewModel] 言い換えテキスト付き: \(withReformulation)件")
+                
+                entries = firestoreEntries.sorted { $0.date > $1.date }
+            } catch {
+                // エラーが発生してもローカルデータを使用
+                print("❌ [GokigenViewModel] Firestore読み込みエラー: \(error.localizedDescription)")
+            }
+        }
     }
 
     private var isDraftEmpty: Bool {
@@ -149,9 +178,11 @@ final class GokigenViewModel: ObservableObject {
                 await MainActor.run {
                     self.reformulatedText = reformulated
                     self.isLoadingReformulation = false
+                    print("✅ [GokigenViewModel] 言い換え成功: \(reformulated.prefix(50))...")
                 }
             } catch {
                 await MainActor.run {
+                    print("❌ [GokigenViewModel] 言い換えエラー: \(error.localizedDescription)")
                     self.publishError(message: Copy.reformulationError)
                     self.isLoadingReformulation = false
                 }
@@ -186,10 +217,26 @@ final class GokigenViewModel: ObservableObject {
             nextStep: next
         )
 
+        print("💾 [GokigenViewModel] エントリを保存: originalText=\(trimmed.prefix(30))..., reformulatedText=\(reformulatedText.isEmpty ? "なし" : reformulatedText.prefix(30).description + "...")")
+
         withAnimation(.easeInOut) {
             entries.insert(entry, at: 0)
         }
         persistence.save(entries)
+        
+        // Firestoreにも保存
+        if let userId = currentUserId {
+            Task {
+                do {
+                    try await firestoreService.saveEntry(entry, for: userId)
+                    print("✅ [GokigenViewModel] Firestoreへの保存成功")
+                } catch {
+                    print("❌ [GokigenViewModel] Firestoreへの保存失敗: \(error.localizedDescription)")
+                }
+            }
+        } else {
+            print("⚠️ [GokigenViewModel] ユーザーIDなし、ローカルのみ保存")
+        }
 
         draftText = ""
         selectedMood = .neutral
@@ -202,12 +249,23 @@ final class GokigenViewModel: ObservableObject {
 
     @MainActor
     func delete(at offsets: IndexSet) {
+        let entriesToDelete = offsets.map { entries[$0] }
+        
         withAnimation(.easeInOut) {
             entries.remove(atOffsets: offsets)
         }
         persistence.save(entries)
+        
+        // Firestoreからも削除
+        if let userId = currentUserId {
+            Task {
+                for entry in entriesToDelete {
+                    try? await firestoreService.deleteEntry(entry.id, for: userId)
+                }
+            }
+        }
     }
-
+    
     @MainActor
     func move(from source: IndexSet, to destination: Int) {
         withAnimation(.easeInOut) {
@@ -222,6 +280,13 @@ final class GokigenViewModel: ObservableObject {
             entries.removeAll()
         }
         persistence.save(entries)
+        
+        // Firestoreからも全削除
+        if let userId = currentUserId {
+            Task {
+                try? await firestoreService.deleteAllEntries(for: userId)
+            }
+        }
     }
 
     private func publishSuccess(message: String) {

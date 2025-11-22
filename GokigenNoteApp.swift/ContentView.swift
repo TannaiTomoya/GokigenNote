@@ -11,6 +11,8 @@ import UIKit
 
 struct TodayView: View {
     @ObservedObject var vm: GokigenViewModel
+    @State private var showCopyToast = false
+    @State private var shareItem: ShareItem?
 
     var body: some View {
         NavigationStack {
@@ -30,6 +32,9 @@ struct TodayView: View {
             .navigationBarTitleDisplayMode(.inline)
             .overlay(toastOverlay, alignment: .bottom)
         }
+        .sheet(item: $shareItem) { item in
+            ActivityViewController(activityItems: [item.text])
+        }
     }
 
     private var toastOverlay: some View {
@@ -39,6 +44,8 @@ struct TodayView: View {
                 ToastBanner(message: success, style: .success)
             } else if let error = vm.lastErrorMessage {
                 ToastBanner(message: error, style: .error)
+            } else if showCopyToast {
+                ToastBanner(message: "コピーしました", style: .success)
             }
         }
         .padding(.horizontal)
@@ -117,9 +124,30 @@ struct TodayView: View {
                 if !vm.reformulatedText.isEmpty {
                     VStack(alignment: .leading, spacing: 8) {
                         Divider()
-                        Text("言い換え")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                        HStack {
+                            Text("言い換え")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            // コピー＆共有ボタン
+                            HStack(spacing: 8) {
+                                Button(action: { copyReformulatedText() }) {
+                                    Label("コピー", systemImage: "doc.on.doc")
+                                        .font(.caption)
+                                        .labelStyle(.iconOnly)
+                                }
+                                .buttonStyle(.bordered)
+                                .buttonBorderShape(.circle)
+                                
+                                Button(action: { shareReformulatedText() }) {
+                                    Label("共有", systemImage: "square.and.arrow.up")
+                                        .font(.caption)
+                                        .labelStyle(.iconOnly)
+                                }
+                                .buttonStyle(.bordered)
+                                .buttonBorderShape(.circle)
+                            }
+                        }
                         Text(vm.reformulatedText)
                             .font(.body)
                             .padding()
@@ -175,9 +203,47 @@ struct TodayView: View {
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
         .shadow(color: Color.black.opacity(0.05), radius: 8, y: 4)
     }
+    
+    // MARK: - Helper Functions
+    
+    private func copyReformulatedText() {
+        UIPasteboard.general.string = vm.reformulatedText
+        showCopyToast = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+            showCopyToast = false
+        }
+    }
+    
+    private func shareReformulatedText() {
+        guard !vm.reformulatedText.isEmpty else { return }
+        shareItem = ShareItem(text: vm.reformulatedText)
+    }
 }
 
-// MARK: - Share Sheet
+// MARK: - Share Item
+
+struct ShareItem: Identifiable {
+    let id = UUID()
+    let text: String
+}
+
+// MARK: - Activity View Controller
+
+struct ActivityViewController: UIViewControllerRepresentable {
+    let activityItems: [Any]
+    
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        let controller = UIActivityViewController(
+            activityItems: activityItems,
+            applicationActivities: nil
+        )
+        return controller
+    }
+    
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
+}
+
+// MARK: - Share Sheet (旧版 - 削除予定)
 
 struct ShareSheet: UIViewControllerRepresentable {
     let activityItems: [Any]

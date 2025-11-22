@@ -9,13 +9,36 @@ import SwiftUI
 
 struct SettingsView: View {
     @ObservedObject var vm: GokigenViewModel
+    @ObservedObject var authVM: AuthViewModel
     @State private var exportText: String = ""
     @State private var isSharePresented = false
     @State private var showDeleteAlert = false
+    @State private var showSignOutAlert = false
     
     var body: some View {
         NavigationStack {
             List {
+                // ユーザー情報セクション
+                if let user = authVM.currentUser {
+                    Section {
+                        HStack {
+                            Image(systemName: "person.circle.fill")
+                                .font(.largeTitle)
+                                .foregroundStyle(.blue)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(user.displayName ?? "ユーザー")
+                                    .font(.headline)
+                                Text(user.email ?? "")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .padding(.vertical, 8)
+                    } header: {
+                        Text("アカウント")
+                    }
+                }
+                
                 // データ管理セクション
                 Section {
                     Button(action: prepareExport) {
@@ -82,7 +105,7 @@ struct SettingsView: View {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("プライバシーについて")
                             .font(.headline)
-                        Text("すべてのデータはあなたのデバイス内に保存されます。クラウド同期はありません。Gemini API使用時のみ、テキストが外部送信されます。")
+                        Text("ログイン後、データはFirestoreクラウドに保存されます。Gemini API使用時は、テキストが外部送信されます。")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -102,6 +125,19 @@ struct SettingsView: View {
                     }
                     .padding(.vertical, 4)
                 }
+                
+                // ログアウトセクション
+                if authVM.isAuthenticated {
+                    Section {
+                        Button(role: .destructive, action: { showSignOutAlert = true }) {
+                            HStack {
+                                Spacer()
+                                Text("ログアウト")
+                                Spacer()
+                            }
+                        }
+                    }
+                }
             }
             .navigationTitle("設定")
         }
@@ -115,6 +151,14 @@ struct SettingsView: View {
             }
         } message: {
             Text("この操作は取り消せません。本当にすべての記録を削除しますか？")
+        }
+        .alert("ログアウト", isPresented: $showSignOutAlert) {
+            Button("キャンセル", role: .cancel) { }
+            Button("ログアウト", role: .destructive) {
+                authVM.signOut()
+            }
+        } message: {
+            Text("ログアウトしてもよろしいですか？")
         }
     }
     

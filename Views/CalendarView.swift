@@ -95,7 +95,8 @@ struct CalendarView: View {
                         date: date,
                         isSelected: calendar.isDate(date, inSameDayAs: selectedDate),
                         hasEntry: hasEntry(for: date),
-                        mood: getMood(for: date)
+                        mood: getMood(for: date),
+                        textLengthLevel: getTextLengthLevel(for: date)
                     )
                     .onTapGesture {
                         selectedDate = date
@@ -224,6 +225,34 @@ struct CalendarView: View {
         }
         return entries.isEmpty ? nil : entries
     }
+    
+    // 文字数に応じた色の濃さレベル（0-5）を取得
+    private func getTextLengthLevel(for date: Date) -> Int {
+        let entries = vm.entries.filter { entry in
+            calendar.isDate(entry.date, inSameDayAs: date)
+        }
+        
+        guard !entries.isEmpty else { return 0 }
+        
+        // その日の最大文字数を取得
+        let maxLength = entries.map { $0.originalText.count }.max() ?? 0
+        
+        // 文字数に応じて5段階にレベル分け
+        switch maxLength {
+        case 0:
+            return 0
+        case 1...30:
+            return 1  // 最も薄い
+        case 31...60:
+            return 2  // 薄い
+        case 61...90:
+            return 3  // 中間
+        case 91...150:
+            return 4  // 濃い
+        default:
+            return 5  // 最も濃い（150文字以上）
+        }
+    }
 }
 
 // MARK: - Day Cell
@@ -233,21 +262,35 @@ struct DayCell: View {
     let isSelected: Bool
     let hasEntry: Bool
     let mood: Mood?
+    let textLengthLevel: Int // 0-5のレベル
     
     private let calendar = Calendar.current
+    
+    // 文字数レベルに応じた色の濃さを取得
+    private var backgroundOpacity: Double {
+        switch textLengthLevel {
+        case 0: return 0.0      // 記録なし
+        case 1: return 0.15     // 1-30文字: 最も薄い
+        case 2: return 0.30     // 31-60文字: 薄い
+        case 3: return 0.50     // 61-90文字: 中間
+        case 4: return 0.70     // 91-150文字: 濃い
+        case 5: return 0.90     // 150文字以上: 最も濃い
+        default: return 0.0
+        }
+    }
     
     var body: some View {
         VStack(spacing: 4) {
             Text("\(calendar.component(.day, from: date))")
                 .font(.body)
-                .foregroundStyle(isSelected ? .white : .primary)
+                .foregroundStyle(textLengthLevel >= 4 ? .white : .primary)
             
             if let mood = mood {
                 Text(mood.emoji)
                     .font(.caption2)
             } else if hasEntry {
                 Circle()
-                    .fill(Color.blue)
+                    .fill(textLengthLevel >= 4 ? Color.white : Color.blue)
                     .frame(width: 4, height: 4)
             }
         }
@@ -255,11 +298,11 @@ struct DayCell: View {
         .frame(height: 50)
         .background(
             RoundedRectangle(cornerRadius: 10)
-                .fill(isSelected ? Color.blue : Color.clear)
+                .fill(Color.blue.opacity(backgroundOpacity))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 10)
-                .stroke(hasEntry && !isSelected ? Color.blue.opacity(0.3) : Color.clear, lineWidth: 1)
+                .stroke(isSelected ? Color.blue : Color.clear, lineWidth: 3)
         )
     }
 }
