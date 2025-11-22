@@ -25,6 +25,12 @@ struct EntryDetailView: View {
                     Text(entry.originalText.isEmpty ? "本文はありません。" : entry.originalText)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
+                if let reformulated = entry.reformulatedText, !reformulated.isEmpty {
+                    Section("言い換え") {
+                        Text(reformulated)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
                 if let empathy = entry.empathyText, !empathy.isEmpty {
                     Section("やさしい言い換え") {
                         Text(empathy)

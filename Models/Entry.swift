@@ -11,6 +11,7 @@ struct Entry: Identifiable, Codable, Equatable {
     var date: Date = Date()
     var mood: Mood
     var originalText: String
+    var reformulatedText: String? // 言語化されたテキスト
     var empathyText: String?
     var nextStep: String?
 }

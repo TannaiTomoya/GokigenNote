@@ -181,6 +181,7 @@ final class GokigenViewModel: ObservableObject {
             date: Date(),
             mood: selectedMood,
             originalText: trimmed,
+            reformulatedText: reformulatedText.isEmpty ? nil : reformulatedText,
             empathyText: empathy,
             nextStep: next
         )
