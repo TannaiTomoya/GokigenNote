@@ -9,6 +9,8 @@ import SwiftUI
 struct EntryDetailView: View {
     let entry: Entry
     @Environment(\.dismiss) private var dismiss
+    @State private var showCopyToast = false
+    @State private var shareItem: ShareItem?
 
     var body: some View {
         NavigationStack {
@@ -26,9 +28,27 @@ struct EntryDetailView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 if let reformulated = entry.reformulatedText, !reformulated.isEmpty {
-                    Section("言い換え") {
-                        Text(reformulated)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                    Section {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text(reformulated)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            
+                            HStack(spacing: 12) {
+                                Button(action: { copyText(reformulated) }) {
+                                    Label("コピー", systemImage: "doc.on.doc")
+                                        .frame(maxWidth: .infinity)
+                                }
+                                .buttonStyle(.bordered)
+                                
+                                Button(action: { shareText(reformulated) }) {
+                                    Label("共有", systemImage: "square.and.arrow.up")
+                                        .frame(maxWidth: .infinity)
+                                }
+                                .buttonStyle(.bordered)
+                            }
+                        }
+                    } header: {
+                        Text("言い換え")
                     }
                 }
                 if let empathy = entry.empathyText, !empathy.isEmpty {
@@ -49,5 +69,47 @@ struct EntryDetailView: View {
                 }
             }
         }
+        .sheet(item: $shareItem) { item in
+            ActivityViewController(activityItems: [item.text])
+        }
+        .overlay(toastOverlay, alignment: .bottom)
+    }
+    
+    private var toastOverlay: some View {
+        VStack {
+            Spacer()
+            if showCopyToast {
+                HStack {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+                    Text("コピーしました")
+                        .foregroundStyle(.primary)
+                }
+                .padding()
+                .background(Color.green.opacity(0.15), in: RoundedRectangle(cornerRadius: 16))
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .padding(.horizontal)
+        .padding(.bottom, 60)
+    }
+    
+    // MARK: - Helper Functions
+    
+    private func copyText(_ text: String) {
+        UIPasteboard.general.string = text
+        withAnimation {
+            showCopyToast = true
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+            withAnimation {
+                showCopyToast = false
+            }
+        }
+    }
+    
+    private func shareText(_ text: String) {
+        guard !text.isEmpty else { return }
+        shareItem = ShareItem(text: text)
     }
 }

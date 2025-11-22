@@ -9,6 +9,7 @@ import SwiftUI
 
 struct MainTabView: View {
     @StateObject private var vm = GokigenViewModel()
+    @ObservedObject var authVM: AuthViewModel
     
     var body: some View {
         TabView {
@@ -31,10 +32,13 @@ struct MainTabView: View {
                 }
             
             // 設定
-            SettingsView(vm: vm)
+            SettingsView(vm: vm, authVM: authVM)
                 .tabItem {
                     Label("設定", systemImage: "gearshape")
                 }
+        }
+        .onAppear {
+            vm.setUserId(authVM.currentUser?.id)
         }
     }
 }
