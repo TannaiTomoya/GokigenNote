@@ -215,6 +215,14 @@ final class GokigenViewModel: ObservableObject {
         }
         persistence.save(entries)
     }
+    
+    @MainActor
+    func deleteAllEntries() {
+        withAnimation(.easeInOut) {
+            entries.removeAll()
+        }
+        persistence.save(entries)
+    }
 
     private func publishSuccess(message: String) {
         withAnimation {

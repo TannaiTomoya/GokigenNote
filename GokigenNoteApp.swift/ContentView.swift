@@ -7,10 +7,10 @@
 import SwiftUI
 import UIKit
 
-struct ContentView: View {
-    @StateObject private var vm = GokigenViewModel()
-    @State private var exportText: String = ""
-    @State private var isSharePresented = false
+// MARK: - Today View (今日の問い画面)
+
+struct TodayView: View {
+    @ObservedObject var vm: GokigenViewModel
 
     var body: some View {
         NavigationStack {
@@ -21,7 +21,6 @@ struct ContentView: View {
                     moodCard
                     inputCard
                     actionRow
-                    historySection
                     TrendCard(snapshot: vm.trendSnapshot)
                 }
                 .padding()
@@ -30,9 +29,6 @@ struct ContentView: View {
             .navigationTitle("ごきげんノート")
             .navigationBarTitleDisplayMode(.inline)
             .overlay(toastOverlay, alignment: .bottom)
-        }
-        .sheet(isPresented: $isSharePresented) {
-            ShareSheet(activityItems: [exportText])
         }
     }
 
@@ -171,41 +167,6 @@ struct ContentView: View {
         }
     }
 
-    private var historySection: some View {
-        cardContainer {
-            VStack(alignment: .leading, spacing: 12) {
-                Text("最近の記録")
-                    .font(.headline)
-                if vm.recentEntries.isEmpty {
-                    Text("まだ記録がありません。今日の一言から始めてみましょう。")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                } else {
-                    ForEach(vm.recentEntries) { entry in
-                        HistoryRow(entry: entry)
-                    }
-                }
-                NavigationLink {
-                    HistoryListView(vm: vm)
-                } label: {
-                    Text("すべての記録を見る")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-                .accessibilityHint("過去の記録一覧に移動します")
-
-                if !vm.recentEntries.isEmpty {
-                    Button(action: prepareExport) {
-                        Label("データを書き出す", systemImage: "square.and.arrow.up")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.bordered)
-                    .accessibilityHint("記録をJSONとして共有します")
-                }
-            }
-        }
-    }
-
     private func cardContainer<Content: View>(@ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             content()
@@ -216,15 +177,7 @@ struct ContentView: View {
     }
 }
 
-// MARK: - Export Helpers
-
-private extension ContentView {
-    func prepareExport() {
-        guard let json = vm.exportEntriesJSON() else { return }
-        exportText = json
-        isSharePresented = true
-    }
-}
+// MARK: - Share Sheet
 
 struct ShareSheet: UIViewControllerRepresentable {
     let activityItems: [Any]
@@ -238,6 +191,8 @@ struct ShareSheet: UIViewControllerRepresentable {
 
     func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) { }
 }
+
+// MARK: - History Row
 
 struct HistoryRow: View {
     let entry: Entry
@@ -261,6 +216,8 @@ struct HistoryRow: View {
         .accessibilityLabel("\(entry.date.formatted(date: .abbreviated, time: .omitted))の記録。気分は\(entry.mood.label)。\(entry.originalText)")
     }
 }
+
+// MARK: - Trend Card
 
 struct TrendCard: View {
     let snapshot: TrendSnapshot
@@ -288,7 +245,9 @@ struct TrendCard: View {
         .accessibilityElement(children: .combine)
         .accessibilityLabel("最近の傾向。平均スコアは\(String(format: "%.1f", snapshot.averageScore))。\(snapshot.feedback)")
     }
-    }
+}
+
+// MARK: - Toast Banner
 
 struct ToastBanner: View {
     enum Style {
