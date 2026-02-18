@@ -9,8 +9,9 @@ import SwiftUI
 
 struct MainTabView: View {
     @StateObject private var vm = GokigenViewModel()
+    @StateObject private var trainingVM = TrainingViewModel()
     @ObservedObject var authVM: AuthViewModel
-    
+
     var body: some View {
         TabView {
             // 今日の問い
@@ -18,19 +19,25 @@ struct MainTabView: View {
                 .tabItem {
                     Label("今日の問い", systemImage: "square.and.pencil")
                 }
-            
+
+            // トレーニング
+            TrainingView(vm: trainingVM, gokigenVM: vm)
+                .tabItem {
+                    Label("トレーニング", systemImage: "brain.head.profile")
+                }
+
             // カレンダー
             CalendarView(vm: vm)
                 .tabItem {
                     Label("カレンダー", systemImage: "calendar")
                 }
-            
+
             // 最近の記録
             HistoryListView(vm: vm)
                 .tabItem {
                     Label("記録", systemImage: "book")
                 }
-            
+
             // 設定
             SettingsView(vm: vm, authVM: authVM)
                 .tabItem {
@@ -39,6 +46,7 @@ struct MainTabView: View {
         }
         .onAppear {
             vm.setUserId(authVM.currentUser?.id)
+            trainingVM.setUserId(authVM.currentUser?.id)
         }
     }
 }
