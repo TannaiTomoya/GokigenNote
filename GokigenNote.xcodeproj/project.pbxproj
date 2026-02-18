@@ -52,6 +52,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A86407D82ED1AD02005DD4B1 /* FirebaseDatabase in Frameworks */,
 				A86406162ED02F1D005DD4B1 /* GoogleGenerativeAI in Frameworks */,
 				A86407DE2ED1BA41005DD4B1 /* FirebaseCore in Frameworks */,
 				A86407E02ED1BA41005DD4B1 /* FirebaseFirestore in Frameworks */,
