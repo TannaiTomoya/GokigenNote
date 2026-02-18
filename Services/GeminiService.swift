@@ -53,13 +53,38 @@ final class GeminiService {
         let response = try await model.generateContent(prompt)
         logger.info("Empathy generation completed.")
         let fullText = response.text ?? ""
-        let parts = fullText.components(separatedBy: "2)")
-        let empathy = parts.first ?? fullText
-        let nextStep = parts.count > 1 ? parts[1] : "今日はゆっくり休むだけで十分です。"
+
+        // 複数の区切りパターンに対応（"2)" "2）" "2." "②" "**2)" "**2）"）
+        let splitPattern = #"(?:\*{0,2})(?:2[)）.]|②)"#
+        let parts = fullText.split(
+            separator: try! Regex(splitPattern),
+            maxSplits: 1
+        )
+
+        let empathy: String
+        let nextStep: String
+
+        if parts.count > 1 {
+            empathy = String(parts[0])
+            nextStep = String(parts[1])
+        } else {
+            // 区切りが見つからない場合: 全体を共感メッセージとしフォールバック
+            empathy = fullText
+            nextStep = "今日はゆっくり休むだけで十分です。"
+        }
+
+        // "1)" 等のプレフィックスも除去
+        let cleanEmpathy = empathy
+            .replacingOccurrences(of: #"^[\s\*]*(?:1[)）.]|①)[\s]*"#, with: "", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        // "次の一歩：" 等のラベルを除去
+        let cleanNextStep = nextStep
+            .replacingOccurrences(of: #"^[\s\*]*(?:次の一歩[：:]?)[\s]*"#, with: "", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
 
         return EmpathyResponse(
-            empathy: empathy.trimmingCharacters(in: .whitespacesAndNewlines),
-            nextStep: nextStep.trimmingCharacters(in: .whitespacesAndNewlines)
+            empathy: cleanEmpathy.isEmpty ? fullText.trimmingCharacters(in: .whitespacesAndNewlines) : cleanEmpathy,
+            nextStep: cleanNextStep.isEmpty ? "今日はゆっくり休むだけで十分です。" : cleanNextStep
         )
     }
     
