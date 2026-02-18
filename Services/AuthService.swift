@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import UIKit
 import FirebaseAuth
 import FirebaseCore
 
@@ -67,30 +68,45 @@ final class AuthService {
     @MainActor
     func signInWithGoogle() async throws -> FirebaseAuth.User {
         let provider = OAuthProvider(providerID: "google.com")
-        
-        // スコープの設定（オプション）
+
+        // スコープの設定
         provider.scopes = ["email", "profile"]
-        
-        // カスタムパラメータ（オプション）
+
+        // カスタムパラメータ
         provider.customParameters = [
             "prompt": "select_account"
         ]
-        
+
+        // ルートViewControllerを取得（OAuth認証画面の提示に必要）
+        guard let windowScene = UIApplication.shared.connectedScenes
+                .compactMap({ $0 as? UIWindowScene }).first,
+              let rootViewController = windowScene.windows.first(where: { $0.isKeyWindow })?.rootViewController else {
+            throw AuthError.unknown("認証画面を表示できません")
+        }
+
         do {
-            // iOS 13+ で利用可能なメソッド
             let result = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<AuthDataResult, Error>) in
-                provider.getCredentialWith(nil) { credential, error in
+                var hasResumed = false
+
+                provider.getCredentialWith(rootViewController) { credential, error in
+                    guard !hasResumed else { return }
+
                     if let error = error {
+                        hasResumed = true
                         continuation.resume(throwing: error)
                         return
                     }
-                    
+
                     guard let credential = credential else {
+                        hasResumed = true
                         continuation.resume(throwing: AuthError.unknown("認証情報の取得に失敗しました"))
                         return
                     }
-                    
+
                     Auth.auth().signIn(with: credential) { authResult, error in
+                        guard !hasResumed else { return }
+                        hasResumed = true
+
                         if let error = error {
                             continuation.resume(throwing: error)
                         } else if let authResult = authResult {

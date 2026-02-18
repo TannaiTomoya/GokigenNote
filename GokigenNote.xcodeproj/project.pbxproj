@@ -9,7 +9,7 @@
 /* Begin PBXBuildFile section */
 		A86406162ED02F1D005DD4B1 /* GoogleGenerativeAI in Frameworks */ = {isa = PBXBuildFile; productRef = A86406152ED02F1D005DD4B1 /* GoogleGenerativeAI */; };
 		A86407D62ED1AD02005DD4B1 /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = A86407D52ED1AD02005DD4B1 /* FirebaseAuth */; };
-		A86407D82ED1AD02005DD4B1 /* FirebaseDatabase in Frameworks */ = {isa = PBXBuildFile; productRef = A86407D72ED1AD02005DD4B1 /* FirebaseDatabase */; };
+
 		A86407DE2ED1BA41005DD4B1 /* FirebaseCore in Frameworks */ = {isa = PBXBuildFile; productRef = A86407DD2ED1BA41005DD4B1 /* FirebaseCore */; };
 		A86407E02ED1BA41005DD4B1 /* FirebaseFirestore in Frameworks */ = {isa = PBXBuildFile; productRef = A86407DF2ED1BA41005DD4B1 /* FirebaseFirestore */; };
 /* End PBXBuildFile section */
@@ -110,7 +110,6 @@
 			packageProductDependencies = (
 				A86406152ED02F1D005DD4B1 /* GoogleGenerativeAI */,
 				A86407D52ED1AD02005DD4B1 /* FirebaseAuth */,
-				A86407D72ED1AD02005DD4B1 /* FirebaseDatabase */,
 				A86407DD2ED1BA41005DD4B1 /* FirebaseCore */,
 				A86407DF2ED1BA41005DD4B1 /* FirebaseFirestore */,
 			);
@@ -400,7 +399,7 @@
 		};
 		A86407D42ED1AD02005DD4B1 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */ = {
 			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "git@github.com:firebase/firebase-ios-sdk.git";
+			repositoryURL = "https://github.com/firebase/firebase-ios-sdk.git";
 			requirement = {
 				kind = upToNextMajorVersion;
 				minimumVersion = 12.6.0;
@@ -418,11 +417,6 @@
 			isa = XCSwiftPackageProductDependency;
 			package = A86407D42ED1AD02005DD4B1 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
 			productName = FirebaseAuth;
-		};
-		A86407D72ED1AD02005DD4B1 /* FirebaseDatabase */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = A86407D42ED1AD02005DD4B1 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
-			productName = FirebaseDatabase;
 		};
 		A86407DD2ED1BA41005DD4B1 /* FirebaseCore */ = {
 			isa = XCSwiftPackageProductDependency;
