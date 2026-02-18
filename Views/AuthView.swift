@@ -14,20 +14,20 @@ struct AuthView: View {
     @State private var password = ""
     @State private var confirmPassword = ""
     @State private var showPasswordReset = false
-    
+
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 24) {
                     // ヘッダー
                     headerSection
-                    
+
                     // フォーム
                     formSection
-                    
+
                     // ボタン
                     buttonSection
-                    
+
                     // 切り替え
                     toggleSection
                 }
@@ -40,14 +40,17 @@ struct AuthView: View {
             .sheet(isPresented: $showPasswordReset) {
                 PasswordResetView(authVM: authVM)
             }
+            .onChange(of: isSignUp) {
+                authVM.clearMessages()
+            }
         }
     }
-    
+
     private var headerSection: some View {
         VStack(spacing: 16) {
             Text("ごきげんノート")
                 .font(.largeTitle.weight(.bold))
-            
+
             Text("あなたの日々の気持ちを記録")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
@@ -55,7 +58,7 @@ struct AuthView: View {
         .padding(.top, 40)
         .padding(.bottom, 20)
     }
-    
+
     private var formSection: some View {
         VStack(spacing: 16) {
             // メールアドレス
@@ -67,9 +70,10 @@ struct AuthView: View {
                     .textFieldStyle(.roundedBorder)
                     .textContentType(.emailAddress)
                     .autocapitalization(.none)
+                    .autocorrectionDisabled()
                     .keyboardType(.emailAddress)
             }
-            
+
             // パスワード
             VStack(alignment: .leading, spacing: 8) {
                 Text("パスワード")
@@ -79,7 +83,7 @@ struct AuthView: View {
                     .textFieldStyle(.roundedBorder)
                     .textContentType(isSignUp ? .newPassword : .password)
             }
-            
+
             // パスワード確認（新規登録時のみ）
             if isSignUp {
                 VStack(alignment: .leading, spacing: 8) {
@@ -91,7 +95,7 @@ struct AuthView: View {
                         .textContentType(.newPassword)
                 }
             }
-            
+
             // エラーメッセージ
             if let error = authVM.errorMessage {
                 Text(error)
@@ -99,11 +103,19 @@ struct AuthView: View {
                     .foregroundStyle(.red)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
+
+            // 成功メッセージ
+            if let success = authVM.successMessage {
+                Text(success)
+                    .font(.caption)
+                    .foregroundStyle(.green)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
         }
         .padding()
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 20))
     }
-    
+
     private var buttonSection: some View {
         VStack(spacing: 12) {
             // メール＋パスワード
@@ -120,7 +132,7 @@ struct AuthView: View {
             }
             .buttonStyle(.borderedProminent)
             .disabled(!isFormValid || authVM.isLoading)
-            
+
             // Google Sign In
             Button(action: { Task { await authVM.signInWithGoogle() } }) {
                 HStack {
@@ -132,7 +144,7 @@ struct AuthView: View {
             }
             .buttonStyle(.bordered)
             .disabled(authVM.isLoading)
-            
+
             // パスワードリセット（ログイン時のみ）
             if !isSignUp {
                 Button("パスワードを忘れた場合") {
@@ -143,7 +155,7 @@ struct AuthView: View {
             }
         }
     }
-    
+
     private var toggleSection: some View {
         Button(action: { isSignUp.toggle() }) {
             Text(isSignUp ? "アカウントをお持ちの方はこちら" : "新規登録はこちら")
@@ -152,24 +164,25 @@ struct AuthView: View {
         }
         .padding(.top)
     }
-    
+
     private var isFormValid: Bool {
-        let emailValid = !email.isEmpty && email.contains("@")
+        let trimmedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines)
+        let emailValid = !trimmedEmail.isEmpty && trimmedEmail.contains("@") && trimmedEmail.contains(".")
         let passwordValid = password.count >= 6
-        
+
         if isSignUp {
             return emailValid && passwordValid && password == confirmPassword
         } else {
             return emailValid && passwordValid
         }
     }
-    
+
     private func handleEmailAuth() {
         Task {
             if isSignUp {
-                await authVM.signUp(email: email, password: password)
+                await authVM.signUp(email: email.trimmingCharacters(in: .whitespacesAndNewlines), password: password)
             } else {
-                await authVM.signIn(email: email, password: password)
+                await authVM.signIn(email: email.trimmingCharacters(in: .whitespacesAndNewlines), password: password)
             }
         }
     }
@@ -181,7 +194,8 @@ struct PasswordResetView: View {
     @ObservedObject var authVM: AuthViewModel
     @Environment(\.dismiss) private var dismiss
     @State private var email = ""
-    
+    @State private var isSent = false
+
     var body: some View {
         NavigationStack {
             VStack(spacing: 24) {
@@ -189,7 +203,7 @@ struct PasswordResetView: View {
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
-                
+
                 VStack(alignment: .leading, spacing: 8) {
                     Text("メールアドレス")
                         .font(.caption)
@@ -198,24 +212,55 @@ struct PasswordResetView: View {
                         .textFieldStyle(.roundedBorder)
                         .textContentType(.emailAddress)
                         .autocapitalization(.none)
+                        .autocorrectionDisabled()
                         .keyboardType(.emailAddress)
                 }
                 .padding()
                 .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 20))
-                
+
+                // エラーメッセージ
+                if let error = authVM.errorMessage {
+                    Text(error)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
+
+                // 成功メッセージ
+                if isSent {
+                    VStack(spacing: 8) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.title)
+                            .foregroundStyle(.green)
+                        Text("メールを送信しました。メールを確認してください。")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                    }
+                }
+
                 Button(action: {
                     Task {
-                        await authVM.resetPassword(email: email)
-                        dismiss()
+                        let success = await authVM.resetPassword(email: email.trimmingCharacters(in: .whitespacesAndNewlines))
+                        if success {
+                            isSent = true
+                        }
                     }
                 }) {
-                    Text("送信")
-                        .fontWeight(.semibold)
-                        .frame(maxWidth: .infinity)
+                    HStack {
+                        if authVM.isLoading {
+                            ProgressView()
+                                .tint(.white)
+                        }
+                        Text(isSent ? "再送信" : "送信")
+                            .fontWeight(.semibold)
+                    }
+                    .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(email.isEmpty || !email.contains("@"))
-                
+                .disabled(email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                          || !email.contains("@")
+                          || authVM.isLoading)
+
                 Spacer()
             }
             .padding()
@@ -223,10 +268,12 @@ struct PasswordResetView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("キャンセル") { dismiss() }
+                    Button("閉じる") { dismiss() }
                 }
+            }
+            .onDisappear {
+                authVM.clearMessages()
             }
         }
     }
 }
-

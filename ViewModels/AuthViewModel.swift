@@ -16,25 +16,26 @@ final class AuthViewModel: ObservableObject {
     @Published var isAuthenticated = false
     @Published var isLoading = false
     @Published var errorMessage: String?
-    
+    @Published var successMessage: String?
+
     private let authService = AuthService.shared
     private let firestoreService = FirestoreService.shared
     private let persistence = Persistence.shared
-    
+
     private var authStateHandle: AuthStateDidChangeListenerHandle?
-    
+
     init() {
         setupAuthStateListener()
     }
-    
+
     deinit {
         if let handle = authStateHandle {
             Auth.auth().removeStateDidChangeListener(handle)
         }
     }
-    
+
     // MARK: - Auth State Listener
-    
+
     private func setupAuthStateListener() {
         authStateHandle = Auth.auth().addStateDidChangeListener { [weak self] _, user in
             Task { @MainActor in
@@ -52,13 +53,21 @@ final class AuthViewModel: ObservableObject {
             }
         }
     }
-    
+
+    /// メッセージをクリアする
+    func clearMessages() {
+        errorMessage = nil
+        successMessage = nil
+    }
+
     // MARK: - Sign Up
-    
+
     func signUp(email: String, password: String) async {
         isLoading = true
         errorMessage = nil
-        
+        successMessage = nil
+        defer { isLoading = false }
+
         do {
             _ = try await authService.signUp(email: email, password: password)
         } catch let error as AuthError {
@@ -66,16 +75,16 @@ final class AuthViewModel: ObservableObject {
         } catch {
             errorMessage = "登録に失敗しました"
         }
-        
-        isLoading = false
     }
-    
+
     // MARK: - Sign In
-    
+
     func signIn(email: String, password: String) async {
         isLoading = true
         errorMessage = nil
-        
+        successMessage = nil
+        defer { isLoading = false }
+
         do {
             _ = try await authService.signIn(email: email, password: password)
         } catch let error as AuthError {
@@ -83,16 +92,16 @@ final class AuthViewModel: ObservableObject {
         } catch {
             errorMessage = "ログインに失敗しました"
         }
-        
-        isLoading = false
     }
-    
+
     // MARK: - Google Sign In
-    
+
     func signInWithGoogle() async {
         isLoading = true
         errorMessage = nil
-        
+        successMessage = nil
+        defer { isLoading = false }
+
         do {
             _ = try await authService.signInWithGoogle()
         } catch let error as AuthError {
@@ -100,30 +109,31 @@ final class AuthViewModel: ObservableObject {
         } catch {
             errorMessage = "Googleログインに失敗しました"
         }
-        
-        isLoading = false
     }
-    
+
     // MARK: - Password Reset
-    
-    func resetPassword(email: String) async {
+
+    func resetPassword(email: String) async -> Bool {
         isLoading = true
         errorMessage = nil
-        
+        successMessage = nil
+        defer { isLoading = false }
+
         do {
             try await authService.resetPassword(email: email)
-            errorMessage = "パスワードリセットメールを送信しました"
+            successMessage = "パスワードリセットメールを送信しました"
+            return true
         } catch let error as AuthError {
             errorMessage = error.errorDescription
+            return false
         } catch {
             errorMessage = "送信に失敗しました"
+            return false
         }
-        
-        isLoading = false
     }
-    
+
     // MARK: - Sign Out
-    
+
     func signOut() {
         do {
             try authService.signOut()
@@ -131,6 +141,6 @@ final class AuthViewModel: ObservableObject {
             errorMessage = "ログアウトに失敗しました"
         }
     }
-    
+
 }
 
