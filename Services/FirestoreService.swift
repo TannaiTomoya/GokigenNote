@@ -19,13 +19,13 @@ final class FirestoreService {
     
     func saveEntry(_ entry: Entry, for userId: String) async throws {
         let data: [String: Any] = [
-            "id": entry.id.uuidString,
             "date": Timestamp(date: entry.date),
             "mood": entry.mood.rawValue,
             "originalText": entry.originalText,
             "reformulatedText": entry.reformulatedText ?? "",
             "empathyText": entry.empathyText ?? "",
             "nextStep": entry.nextStep ?? "",
+            "updatedAt": Timestamp(date: entry.updatedAt),
             "userId": userId
         ]
         
@@ -33,43 +33,84 @@ final class FirestoreService {
             .document(userId)
             .collection("entries")
             .document(entry.id.uuidString)
-            .setData(data)
+            .setData(data, merge: true)
     }
     
-    func loadEntries(for userId: String) async throws -> [Entry] {
-        let snapshot = try await db.collection("users")
+    /// ページング用：指定件数だけ取得し、続きがあれば lastDoc を返す
+    func loadEntriesPage(
+        for userId: String,
+        limit: Int = 30,
+        startAfter: DocumentSnapshot? = nil
+    ) async throws -> (entries: [Entry], lastDoc: DocumentSnapshot?) {
+        var query: Query = db.collection("users")
             .document(userId)
             .collection("entries")
             .order(by: "date", descending: true)
-            .getDocuments()
-        
-        var entries: [Entry] = []
-        
-        for document in snapshot.documents {
-            let data = document.data()
-            
-            guard let idString = data["id"] as? String,
-                  let id = UUID(uuidString: idString),
+            .limit(to: limit)
+
+        if let startAfter = startAfter {
+            query = query.start(afterDocument: startAfter)
+        }
+
+        let snapshot = try await query.getDocuments()
+
+        let entries: [Entry] = snapshot.documents.compactMap { doc in
+            let data = doc.data()
+            let id = UUID(uuidString: doc.documentID) ?? (data["id"] as? String).flatMap { UUID(uuidString: $0) }
+            guard let id = id,
                   let timestamp = data["date"] as? Timestamp,
                   let moodRawValue = data["mood"] as? Int,
                   let mood = Mood(rawValue: moodRawValue),
                   let originalText = data["originalText"] as? String else {
-                continue
+                return nil
             }
-            
-            let entry = Entry(
+            let updatedAt = (data["updatedAt"] as? Timestamp)?.dateValue() ?? timestamp.dateValue()
+            return Entry(
                 id: id,
                 date: timestamp.dateValue(),
                 mood: mood,
                 originalText: originalText,
                 reformulatedText: data["reformulatedText"] as? String,
                 empathyText: data["empathyText"] as? String,
-                nextStep: data["nextStep"] as? String
+                nextStep: data["nextStep"] as? String,
+                updatedAt: updatedAt
             )
-            
-            entries.append(entry)
         }
-        
+
+        return (entries, snapshot.documents.last)
+    }
+
+    /// 原則禁止。全件 read のため課金が増える。一覧は loadEntriesPage でページングすること。
+    func loadAllEntries(for userId: String) async throws -> [Entry] {
+        let snapshot = try await db.collection("users")
+            .document(userId)
+            .collection("entries")
+            .order(by: "date", descending: true)
+            .getDocuments()
+
+        var entries: [Entry] = []
+        for document in snapshot.documents {
+            let data = document.data()
+            let id = UUID(uuidString: document.documentID) ?? (data["id"] as? String).flatMap { UUID(uuidString: $0) }
+            guard let id = id,
+                  let timestamp = data["date"] as? Timestamp,
+                  let moodRawValue = data["mood"] as? Int,
+                  let mood = Mood(rawValue: moodRawValue),
+                  let originalText = data["originalText"] as? String else {
+                continue
+            }
+            let updatedAt = (data["updatedAt"] as? Timestamp)?.dateValue() ?? timestamp.dateValue()
+            entries.append(Entry(
+                id: id,
+                date: timestamp.dateValue(),
+                mood: mood,
+                originalText: originalText,
+                reformulatedText: data["reformulatedText"] as? String,
+                empathyText: data["empathyText"] as? String,
+                nextStep: data["nextStep"] as? String,
+                updatedAt: updatedAt
+            ))
+        }
         return entries
     }
     
@@ -103,13 +144,13 @@ final class FirestoreService {
         
         for entry in entries {
             let data: [String: Any] = [
-                "id": entry.id.uuidString,
                 "date": Timestamp(date: entry.date),
                 "mood": entry.mood.rawValue,
                 "originalText": entry.originalText,
                 "reformulatedText": entry.reformulatedText ?? "",
                 "empathyText": entry.empathyText ?? "",
                 "nextStep": entry.nextStep ?? "",
+                "updatedAt": Timestamp(date: entry.updatedAt),
                 "userId": userId
             ]
             

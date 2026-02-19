@@ -8,6 +8,7 @@
 import Foundation
 import SwiftUI
 import Combine
+import FirebaseFirestore
 
 final class GokigenViewModel: ObservableObject {
     @Published var selectedMood: Mood = .neutral
@@ -21,6 +22,9 @@ final class GokigenViewModel: ObservableObject {
     @Published var lastErrorMessage: String?
     @Published private(set) var isLoadingEmpathy: Bool = false
     @Published private(set) var isLoadingReformulation: Bool = false
+    @Published private(set) var isLoadingEntries: Bool = false
+    @Published private(set) var canLoadMore: Bool = true
+    @Published private(set) var isSyncing: Bool = false
 
     private enum Copy {
         static let saveSuccess = "あなたの今が書き留められたよ。"
@@ -33,6 +37,9 @@ final class GokigenViewModel: ObservableObject {
     private let geminiService = GeminiService()
     private let firestoreService = FirestoreService.shared
     private var currentUserId: String?
+    private var lastEntryDoc: DocumentSnapshot?
+    private var lastLoadMoreAt: Date = .distantPast
+    private var isFlushingPending = false
     private var lastGeminiSuccess: (text: String, response: EmpathyResponse)?
     private var lastGeminiRequest: String?
     private let micExamples: [Mood: [String]] = [
@@ -60,34 +67,157 @@ final class GokigenViewModel: ObservableObject {
 
     @MainActor
     init() {
-        // プロパティを明示的に初期化
         self.currentPrompt = PromptProvider.random()
-        self.entries = persistence.load().sorted { $0.date > $1.date }
+        self.entries = []
     }
-    
+
     func setUserId(_ userId: String?) {
-        self.currentUserId = userId
-        if let userId = userId {
-            loadEntriesFromFirestore(userId: userId)
+        guard let userId else { return }
+        guard currentUserId != userId else { return }
+        currentUserId = userId
+
+        // ① ローカル先出し（即表示）
+        let cached = persistence.loadEntries(userId: userId)
+        self.entries = cached.sorted { $0.date > $1.date }
+
+        // ② pending 再送（先に実行）
+        flushPending()
+
+        // ③ 裏で Firestore 初回ページ同期
+        loadInitial(userId: userId)
+    }
+
+    /// Firestore 保存失敗時に pending に積む
+    private func enqueuePending(_ id: UUID, userId: String) {
+        persistence.addPendingEntryId(id, userId: userId)
+    }
+
+    /// 成功したら pending から消す（以前の失敗が残ってても即回収）
+    private func dequeuePending(_ id: UUID, userId: String) {
+        persistence.removePendingEntryId(id, userId: userId)
+    }
+
+    /// 未同期キューを再送。失敗したら break。entries に無い id は削除（ゴミ掃除）。多重実行ガードあり。
+    @MainActor
+    func flushPending() {
+        guard let uid = currentUserId else { return }
+        guard !isFlushingPending else { return }
+        isFlushingPending = true
+
+        Task {
+            defer { Task { @MainActor in self.isFlushingPending = false } }
+
+            let pending = persistence.loadPendingEntryIds(userId: uid)
+            guard !pending.isEmpty else { return }
+
+            let pendingSorted = await MainActor.run {
+                pending.sorted { a, b in
+                    let ea = self.entries.first(where: { $0.id == a })?.updatedAt ?? .distantPast
+                    let eb = self.entries.first(where: { $0.id == b })?.updatedAt ?? .distantPast
+                    return ea < eb
+                }
+            }
+
+            for id in pendingSorted {
+                let entry = await MainActor.run {
+                    self.entries.first(where: { $0.id == id })
+                }
+
+                guard let entry else {
+                    persistence.removePendingEntryId(id, userId: uid)
+                    continue
+                }
+
+                do {
+                    try await firestoreService.saveEntry(entry, for: uid)
+                    persistence.removePendingEntryId(id, userId: uid)
+                } catch {
+                    break
+                }
+            }
         }
     }
-    
-    @MainActor
-    private func loadEntriesFromFirestore(userId: String) {
+
+    /// Entry の内容が変わったときに必ず呼ぶ。updatedAt を更新し「新しい方が勝つ」マージを保証する。
+    private func touch(_ entry: inout Entry) {
+        entry.updatedAt = Date()
+    }
+
+    /// ローカルとリモートを id でマージ。同じ id は updatedAt が新しい方を採用。オフラインで増えたローカルは残す。
+    private func merge(local: [Entry], remote: [Entry]) -> [Entry] {
+        var dict = Dictionary(uniqueKeysWithValues: local.map { ($0.id, $0) })
+        for r in remote {
+            if let l = dict[r.id] {
+                dict[r.id] = (l.updatedAt >= r.updatedAt) ? l : r
+            } else {
+                dict[r.id] = r
+            }
+        }
+        return dict.values.sorted { $0.date > $1.date }
+    }
+
+    /// Firestore 初回1ページ取得 → マージ → キャッシュ更新
+    private func loadInitial(userId: String) {
+        lastEntryDoc = nil
+        canLoadMore = true
+        isSyncing = true
+
         Task {
             do {
-                print("📥 [GokigenViewModel] Firestoreから読み込み開始...")
-                let firestoreEntries = try await firestoreService.loadEntries(for: userId)
-                print("✅ [GokigenViewModel] Firestore読み込み成功: \(firestoreEntries.count)件")
-                
-                // 言い換えテキストの有無を確認
-                let withReformulation = firestoreEntries.filter { $0.reformulatedText != nil }.count
-                print("📝 [GokigenViewModel] 言い換えテキスト付き: \(withReformulation)件")
-                
-                entries = firestoreEntries.sorted { $0.date > $1.date }
+                let result = try await firestoreService.loadEntriesPage(
+                    for: userId,
+                    limit: 30,
+                    startAfter: nil
+                )
+                await MainActor.run {
+                    self.entries = self.merge(local: self.entries, remote: result.entries)
+                    self.lastEntryDoc = result.lastDoc
+                    self.canLoadMore = !result.entries.isEmpty && result.entries.count == 30 && result.lastDoc != nil
+                    self.isSyncing = false
+                    self.persistence.saveEntries(self.entries, userId: userId)
+                }
+                await MainActor.run {
+                    self.flushPending()
+                }
             } catch {
-                // エラーが発生してもローカルデータを使用
-                print("❌ [GokigenViewModel] Firestore読み込みエラー: \(error.localizedDescription)")
+                await MainActor.run {
+                    self.isSyncing = false
+                    print("❌ [GokigenViewModel] Firestore初回読み込みエラー: \(error.localizedDescription)")
+                }
+            }
+        }
+    }
+
+    /// 追加読み込み（記録タブで末尾表示時に呼ぶ）。連打防止のため 0.7 秒クールダウンあり。
+    func loadMore(userId: String? = nil) {
+        let uid = userId ?? currentUserId
+        guard let uid, !isLoadingEntries, canLoadMore else { return }
+        guard Date().timeIntervalSince(lastLoadMoreAt) > 0.7 else { return }
+
+        lastLoadMoreAt = Date()
+        isLoadingEntries = true
+        Task {
+            do {
+                let result = try await firestoreService.loadEntriesPage(
+                    for: uid,
+                    limit: 30,
+                    startAfter: lastEntryDoc
+                )
+                await MainActor.run {
+                    if lastEntryDoc == nil {
+                        self.entries = result.entries.sorted { $0.date > $1.date }
+                    } else {
+                        self.entries = (self.entries + result.entries).sorted { $0.date > $1.date }
+                    }
+                    self.lastEntryDoc = result.lastDoc
+                    self.canLoadMore = !result.entries.isEmpty && result.entries.count == 30 && result.lastDoc != nil
+                    self.isLoadingEntries = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.isLoadingEntries = false
+                    print("❌ [GokigenViewModel] Firestore読み込みエラー: \(error.localizedDescription)")
+                }
             }
         }
     }
@@ -208,7 +338,7 @@ final class GokigenViewModel: ObservableObject {
             next = fallback.1
         }
 
-        let entry = Entry(
+        var entry = Entry(
             date: Date(),
             mood: selectedMood,
             originalText: trimmed,
@@ -216,22 +346,29 @@ final class GokigenViewModel: ObservableObject {
             empathyText: empathy,
             nextStep: next
         )
+        entry.updatedAt = Date()
 
         print("💾 [GokigenViewModel] エントリを保存: originalText=\(trimmed.prefix(30))..., reformulatedText=\(reformulatedText.isEmpty ? "なし" : reformulatedText.prefix(30).description + "...")")
 
         withAnimation(.easeInOut) {
             entries.insert(entry, at: 0)
         }
-        persistence.save(entries)
-        
-        // Firestoreにも保存
+        if let uid = currentUserId {
+            persistence.saveEntries(entries, userId: uid)
+        } else {
+            persistence.save(entries)
+        }
+
+        // Firestoreにも保存（失敗時は pending に積む。成功時は pending から消す）
         if let userId = currentUserId {
             Task {
                 do {
                     try await firestoreService.saveEntry(entry, for: userId)
+                    dequeuePending(entry.id, userId: userId)
                     print("✅ [GokigenViewModel] Firestoreへの保存成功")
                 } catch {
-                    print("❌ [GokigenViewModel] Firestoreへの保存失敗: \(error.localizedDescription)")
+                    enqueuePending(entry.id, userId: userId)
+                    print("❌ [GokigenViewModel] Firestoreへの保存失敗（pending に追加）: \(error.localizedDescription)")
                 }
             }
         } else {
@@ -254,8 +391,12 @@ final class GokigenViewModel: ObservableObject {
         withAnimation(.easeInOut) {
             entries.remove(atOffsets: offsets)
         }
-        persistence.save(entries)
-        
+        if let uid = currentUserId {
+            persistence.saveEntries(entries, userId: uid)
+        } else {
+            persistence.save(entries)
+        }
+
         // Firestoreからも削除
         if let userId = currentUserId {
             Task {
@@ -271,7 +412,11 @@ final class GokigenViewModel: ObservableObject {
         withAnimation(.easeInOut) {
             entries.move(fromOffsets: source, toOffset: destination)
         }
-        persistence.save(entries)
+        if let uid = currentUserId {
+            persistence.saveEntries(entries, userId: uid)
+        } else {
+            persistence.save(entries)
+        }
     }
     
     @MainActor
@@ -279,8 +424,12 @@ final class GokigenViewModel: ObservableObject {
         withAnimation(.easeInOut) {
             entries.removeAll()
         }
-        persistence.save(entries)
-        
+        if let uid = currentUserId {
+            persistence.saveEntries(entries, userId: uid)
+        } else {
+            persistence.save(entries)
+        }
+
         // Firestoreからも全削除
         if let userId = currentUserId {
             Task {

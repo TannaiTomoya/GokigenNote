@@ -1,8 +1,8 @@
 # Gemini API Key (最重要！)
-Gemini-Info.plist
+**/Gemini-Info.plist
 
 # Firebase Configuration (最重要！)
-GoogleService-Info.plist
+**/GoogleService-Info.plist
 
 # Xcode
 #
