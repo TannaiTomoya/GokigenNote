@@ -21,21 +21,30 @@ struct AuthView: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 24) {
-                    // ヘッダー
                     headerSection
-
-                    // フォーム
                     formSection
-
-                    // ボタン
                     buttonSection
-
-                    // 切り替え
                     toggleSection
                 }
                 .padding()
             }
+            // ローディング中だけタップ吸収
+            .overlay {
+                if authVM.isLoading {
+                    ZStack {
+                        Color.black.opacity(0.2).ignoresSafeArea()
+                        ProgressView()
+                            .padding(16)
+                            .background(.ultraThinMaterial)
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                    }
+                    .allowsHitTesting(true)
+                }
+            }
+
+            // デバッグ表示は DEBUG のときだけ（通常時は消す）
             .overlay(alignment: .top) {
+                #if DEBUG
                 VStack(alignment: .leading, spacing: 4) {
                     Text("isLoading: \(authVM.isLoading.description)")
                     Text("isSignUp: \(isSignUp.description)")
@@ -45,25 +54,23 @@ struct AuthView: View {
                 .background(.yellow)
                 .foregroundStyle(.black)
                 .zIndex(9999)
+                .allowsHitTesting(false)
+                #endif
             }
+
             .background(Color(UIColor.systemGroupedBackground).ignoresSafeArea())
             .navigationTitle(isSignUp ? "新規登録" : "ログイン")
             .navigationBarTitleDisplayMode(.inline)
-            .disabled(authVM.isLoading)
-            .overlay {
-                if authVM.isLoading {
-                    ZStack {
-                        Color.black.opacity(0.2).ignoresSafeArea()
-                        ProgressView()
-                    }
-                }
-            }
             .sheet(isPresented: $showPasswordReset) {
                 PasswordResetView(authVM: authVM)
             }
-            .onAppear { print("Auth isLoading:", authVM.isLoading) }
-            .onChange(of: authVM.isLoading) { (_: Bool, new: Bool) in print("Auth isLoading changed:", new) }
-            .onChange(of: isSignUp) {
+            .onAppear {
+                print("Auth isLoading:", authVM.isLoading)
+            }
+            .onChange(of: authVM.isLoading) { _, new in
+                print("Auth isLoading changed:", new)
+            }
+            .onChange(of: isSignUp) { _, _ in
                 authVM.clearMessages()
             }
         }
@@ -84,11 +91,11 @@ struct AuthView: View {
 
     private var formSection: some View {
         VStack(spacing: 16) {
-            // メールアドレス
             VStack(alignment: .leading, spacing: 8) {
                 Text("メールアドレス")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+
                 TextField("example@email.com", text: $email)
                     .textFieldStyle(.roundedBorder)
                     .textContentType(.emailAddress)
@@ -97,38 +104,36 @@ struct AuthView: View {
                     .keyboardType(.emailAddress)
             }
 
-            // パスワード
             VStack(alignment: .leading, spacing: 8) {
                 Text("パスワード")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+
                 SecureField("6文字以上", text: $password)
                     .textFieldStyle(.roundedBorder)
                     .textContentType(isSignUp ? .newPassword : .password)
             }
 
-            // パスワード確認（新規登録時のみ）
             if isSignUp {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("パスワード（確認）")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+
                     SecureField("もう一度入力", text: $confirmPassword)
                         .textFieldStyle(.roundedBorder)
                         .textContentType(.newPassword)
                 }
             }
 
-            // エラーメッセージ
-            if let error = authVM.errorMessage {
+            if let error = authVM.errorMessage, !error.isEmpty {
                 Text(error)
                     .font(.caption)
                     .foregroundStyle(.red)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
 
-            // 成功メッセージ
-            if let success = authVM.successMessage {
+            if let success = authVM.successMessage, !success.isEmpty {
                 Text(success)
                     .font(.caption)
                     .foregroundStyle(.green)
@@ -141,12 +146,10 @@ struct AuthView: View {
 
     private var buttonSection: some View {
         VStack(spacing: 12) {
-            // メール＋パスワード
             Button(action: handleEmailAuth) {
                 HStack {
                     if authVM.isLoading {
-                        ProgressView()
-                            .tint(.white)
+                        ProgressView().tint(.white)
                     }
                     Text(isSignUp ? "登録" : "ログイン")
                         .fontWeight(.semibold)
@@ -154,9 +157,8 @@ struct AuthView: View {
                 .frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
-            .disabled(!isFormValid || authVM.isLoading)
+            .disabled(!isFormValid)
 
-            // Google Sign In
             Button(action: { Task { await authVM.signInWithGoogle() } }) {
                 HStack {
                     Image(systemName: "g.circle.fill")
@@ -167,7 +169,6 @@ struct AuthView: View {
             }
             .buttonStyle(.bordered)
 
-            // パスワードリセット（ログイン時のみ）
             if !isSignUp {
                 Button("パスワードを忘れた場合") {
                     showPasswordReset = true
@@ -189,8 +190,7 @@ struct AuthView: View {
 
     private var isFormValid: Bool {
         let trimmedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines)
-        let emailValid =
-            !trimmedEmail.isEmpty && trimmedEmail.contains("@") && trimmedEmail.contains(".")
+        let emailValid = !trimmedEmail.isEmpty && trimmedEmail.contains("@") && trimmedEmail.contains(".")
         let passwordValid = password.count >= 6
 
         if isSignUp {
@@ -202,14 +202,11 @@ struct AuthView: View {
 
     private func handleEmailAuth() {
         Task {
+            let e = email.trimmingCharacters(in: .whitespacesAndNewlines)
             if isSignUp {
-                await authVM.signUp(
-                    email: email.trimmingCharacters(in: .whitespacesAndNewlines), password: password
-                )
+                await authVM.signUp(email: e, password: password)
             } else {
-                await authVM.signIn(
-                    email: email.trimmingCharacters(in: .whitespacesAndNewlines), password: password
-                )
+                await authVM.signIn(email: e, password: password)
             }
         }
     }
@@ -235,6 +232,7 @@ struct PasswordResetView: View {
                     Text("メールアドレス")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+
                     TextField("example@email.com", text: $email)
                         .textFieldStyle(.roundedBorder)
                         .textContentType(.emailAddress)
@@ -245,14 +243,12 @@ struct PasswordResetView: View {
                 .padding()
                 .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 20))
 
-                // エラーメッセージ
-                if let error = authVM.errorMessage {
+                if let error = authVM.errorMessage, !error.isEmpty {
                     Text(error)
                         .font(.caption)
                         .foregroundStyle(.red)
                 }
 
-                // 成功メッセージ
                 if isSent {
                     VStack(spacing: 8) {
                         Image(systemName: "checkmark.circle.fill")
@@ -268,16 +264,14 @@ struct PasswordResetView: View {
                 Button(action: {
                     Task {
                         let success = await authVM.resetPassword(
-                            email: email.trimmingCharacters(in: .whitespacesAndNewlines))
-                        if success {
-                            isSent = true
-                        }
+                            email: email.trimmingCharacters(in: .whitespacesAndNewlines)
+                        )
+                        if success { isSent = true }
                     }
                 }) {
                     HStack {
                         if authVM.isLoading {
-                            ProgressView()
-                                .tint(.white)
+                            ProgressView().tint(.white)
                         }
                         Text(isSent ? "再送信" : "送信")
                             .fontWeight(.semibold)
@@ -287,8 +281,9 @@ struct PasswordResetView: View {
                 .buttonStyle(.borderedProminent)
                 .disabled(
                     email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                        || !email.contains("@")
-                        || authVM.isLoading)
+                    || !email.contains("@")
+                    || authVM.isLoading
+                )
 
                 Spacer()
             }
@@ -298,6 +293,17 @@ struct PasswordResetView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("閉じる") { dismiss() }
+                }
+            }
+            .overlay {
+                if authVM.isLoading {
+                    ZStack {
+                        Color.black.opacity(0.2).ignoresSafeArea()
+                        ProgressView()
+                            .padding(16)
+                            .background(.ultraThinMaterial)
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                    }
                 }
             }
             .onDisappear {

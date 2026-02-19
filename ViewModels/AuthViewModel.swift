@@ -4,8 +4,6 @@
 //
 //  Created by 丹内智弥 on 2025/11/22.
 //
-// isLoading の変更経路を完全トラッキングするためのログ追加。
-// 起動直後に isLoading が true になる原因を特定する目的。
 
 import Foundation
 import SwiftUI
@@ -21,9 +19,6 @@ final class AuthViewModel: ObservableObject {
     @Published var successMessage: String?
 
     private let authService = AuthService.shared
-    private let firestoreService = FirestoreService.shared
-    private let persistence = Persistence.shared
-
     private var authStateHandle: AuthStateDidChangeListenerHandle?
 
     init() {
@@ -47,37 +42,65 @@ final class AuthViewModel: ObservableObject {
     private func setupAuthStateListener() {
         authStateHandle = Auth.auth().addStateDidChangeListener { [weak self] _, user in
             Task { @MainActor in
-                if let user = user {
-                    self?.currentUser = User(
+                guard let self else { return }
+                if let user {
+                    self.currentUser = User(
                         id: user.uid,
                         email: user.email,
                         displayName: user.displayName
                     )
-                    self?.isAuthenticated = true
+                    self.isAuthenticated = true
                 } else {
-                    self?.currentUser = nil
-                    self?.isAuthenticated = false
+                    self.currentUser = nil
+                    self.isAuthenticated = false
                 }
             }
         }
     }
 
-    /// メッセージをクリアする
+    // MARK: - Utilities
+
     func clearMessages() {
         errorMessage = nil
         successMessage = nil
     }
 
+    private struct TimeoutError: Error {}
+
+    /// await が帰ってこない事故対策（Googleログインで起きがち）
+    private func withTimeout<T>(
+        seconds: UInt64,
+        operation: @escaping () async throws -> T
+    ) async throws -> T {
+        try await withThrowingTaskGroup(of: T.self) { group in
+            group.addTask {
+                try await operation()
+            }
+            group.addTask {
+                try await Task.sleep(nanoseconds: seconds * 1_000_000_000)
+                throw TimeoutError()
+            }
+            let result = try await group.next()!
+            group.cancelAll()
+            return result
+        }
+    }
+
     // MARK: - Sign Up
 
     func signUp(email: String, password: String) async {
+        if isLoading { return }
         setLoading(true, "signUp start")
-        errorMessage = nil
-        successMessage = nil
+        clearMessages()
         defer { setLoading(false, "signUp end") }
 
         do {
-            _ = try await authService.signUp(email: email, password: password)
+            _ = try await withTimeout(seconds: 20) {
+                try await self.authService.signUp(email: email, password: password)
+            }
+            successMessage = "登録しました"
+        } catch is TimeoutError {
+            errorMessage = "処理がタイムアウトしました（通信状況を確認してください）"
         } catch let error as AuthError {
             errorMessage = error.errorDescription
         } catch {
@@ -88,13 +111,18 @@ final class AuthViewModel: ObservableObject {
     // MARK: - Sign In
 
     func signIn(email: String, password: String) async {
+        if isLoading { return }
         setLoading(true, "signIn start")
-        errorMessage = nil
-        successMessage = nil
+        clearMessages()
         defer { setLoading(false, "signIn end") }
 
         do {
-            _ = try await authService.signIn(email: email, password: password)
+            _ = try await withTimeout(seconds: 20) {
+                try await self.authService.signIn(email: email, password: password)
+            }
+            successMessage = "ログインしました"
+        } catch is TimeoutError {
+            errorMessage = "処理がタイムアウトしました（通信状況を確認してください）"
         } catch let error as AuthError {
             errorMessage = error.errorDescription
         } catch {
@@ -105,13 +133,18 @@ final class AuthViewModel: ObservableObject {
     // MARK: - Google Sign In
 
     func signInWithGoogle() async {
+        if isLoading { return }
         setLoading(true, "Google start")
-        errorMessage = nil
-        successMessage = nil
+        clearMessages()
         defer { setLoading(false, "Google end") }
 
         do {
-            _ = try await authService.signInWithGoogle()
+            _ = try await withTimeout(seconds: 30) {
+                try await self.authService.signInWithGoogle()
+            }
+            successMessage = "Googleでログインしました"
+        } catch is TimeoutError {
+            errorMessage = "Googleログインがタイムアウトしました（画面が出ない/閉じない可能性）"
         } catch let error as AuthError {
             errorMessage = error.errorDescription
         } catch {
@@ -122,15 +155,20 @@ final class AuthViewModel: ObservableObject {
     // MARK: - Password Reset
 
     func resetPassword(email: String) async -> Bool {
+        if isLoading { return false }
         setLoading(true, "resetPassword start")
-        errorMessage = nil
-        successMessage = nil
+        clearMessages()
         defer { setLoading(false, "resetPassword end") }
 
         do {
-            try await authService.resetPassword(email: email)
+            try await withTimeout(seconds: 20) {
+                try await self.authService.resetPassword(email: email)
+            }
             successMessage = "パスワードリセットメールを送信しました"
             return true
+        } catch is TimeoutError {
+            errorMessage = "処理がタイムアウトしました（通信状況を確認してください）"
+            return false
         } catch let error as AuthError {
             errorMessage = error.errorDescription
             return false
@@ -149,5 +187,4 @@ final class AuthViewModel: ObservableObject {
             errorMessage = "ログアウトに失敗しました"
         }
     }
-
 }
