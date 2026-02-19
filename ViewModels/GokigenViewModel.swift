@@ -13,6 +13,9 @@ import FirebaseFirestore
 final class GokigenViewModel: ObservableObject {
     @Published var selectedMood: Mood = .neutral
     @Published var draftText: String = ""
+    @Published var reformulationPurpose: ReformulationPurpose = .shareFeeling
+    @Published var reformulationAudience: ReformulationAudience = .colleague
+    @Published var reformulationTone: ReformulationTone = .soft
     @Published var currentPrompt: String
     @Published private(set) var empathyDraft: String = ""
     @Published private(set) var nextStepDraft: String = ""
@@ -142,16 +145,21 @@ final class GokigenViewModel: ObservableObject {
         UserDefaults.standard.set(count + 1, forKey: keyCount)
     }
 
+    /// 目的・相手・トーンを含むキャッシュキー（同じ入力でもコンテキストで別結果）
+    private func reformulationCacheKey(trimmed: String) -> String {
+        "\(trimmed)|\(reformulationPurpose.rawValue)|\(reformulationAudience.rawValue)|\(reformulationTone.rawValue)"
+    }
+
     /// 言い換え結果をキャッシュに追加（最大件数で古いものを削除）（Phase 1）
-    private func setReformulationCache(input: String, result: String) {
+    private func setReformulationCache(cacheKey: String, result: String) {
         if reformulationCacheOrder.count >= Self.reformulationCacheMaxCount, let first = reformulationCacheOrder.first {
             reformulationCacheOrder.removeFirst()
             reformulationCache.removeValue(forKey: first)
         }
-        if !reformulationCacheOrder.contains(input) {
-            reformulationCacheOrder.append(input)
+        if !reformulationCacheOrder.contains(cacheKey) {
+            reformulationCacheOrder.append(cacheKey)
         }
-        reformulationCache[input] = result
+        reformulationCache[cacheKey] = result
     }
 
     private let persistence = Persistence.shared
@@ -435,8 +443,15 @@ final class GokigenViewModel: ObservableObject {
             return
         }
 
+        let context = ReformulationContext(
+            purpose: reformulationPurpose,
+            audience: reformulationAudience,
+            tone: reformulationTone
+        )
+        let cacheKey = reformulationCacheKey(trimmed: trimmed)
+
         // キャッシュヒットは0消費
-        if let cached = reformulationCache[trimmed] {
+        if let cached = reformulationCache[cacheKey] {
             reformulatedText = cached
             return
         }
@@ -462,12 +477,12 @@ final class GokigenViewModel: ObservableObject {
             defer { Task { @MainActor in self.endAIRequest(token) } }
 
             do {
-                let reformulated = try await geminiService.reformulateText(for: trimmed)
+                let reformulated = try await geminiService.reformulateText(for: trimmed, context: context)
                 await MainActor.run {
                     guard self.reformulationRequestID == token.id else { return }
 
                     self.reformulatedText = reformulated
-                    self.setReformulationCache(input: trimmed, result: reformulated)
+                    self.setReformulationCache(cacheKey: cacheKey, result: reformulated)
                 }
             } catch {
                 await MainActor.run {

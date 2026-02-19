@@ -38,6 +38,7 @@ enum AuthError: LocalizedError {
     case wrongPassword
     case emailAlreadyInUse
     case networkError
+    case invalidCredential
     case unknown(String)
 
     var errorDescription: String? {
@@ -48,6 +49,7 @@ enum AuthError: LocalizedError {
         case .wrongPassword: return "パスワードが正しくありません"
         case .emailAlreadyInUse: return "このメールアドレスは既に使用されています"
         case .networkError: return "ネットワークエラーが発生しました"
+        case .invalidCredential: return "認証情報が無効または期限切れです。パスワードを確認するか、もう一度お試しください。"
         case .unknown(let message): return message
         }
     }
@@ -159,6 +161,7 @@ final class AuthService {
             case .wrongPassword: return .wrongPassword
             case .emailAlreadyInUse: return .emailAlreadyInUse
             case .networkError: return .networkError
+            case .invalidCredential: return .invalidCredential
             default: return .unknown(error.localizedDescription)
             }
         }

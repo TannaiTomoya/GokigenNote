@@ -88,8 +88,8 @@ final class GeminiService {
         )
     }
     
-    // 言語化が苦手な人のための文章整形機能
-    func reformulateText(for text: String) async throws -> String {
+    // 言語化が苦手な人のための文章整形機能（目的・相手・トーン指定あり）
+    func reformulateText(for text: String, context: ReformulationContext = .default) async throws -> String {
         guard let model = model else {
             throw GeminiError.apiKeyNotAvailable
         }
@@ -101,15 +101,18 @@ final class GeminiService {
         ユーザーが入力した文章：
         「\(text)」
 
-        この文章を、以下の点に注意して綺麗に言語化してください：
+        【伝え方の指定】
+        - 目的：\(context.purpose.rawValue)
+        - 相手：\(context.audience.rawValue)
+        - トーン：\(context.tone.rawValue)
 
-        1) ユーザーの気持ちや考えを正確に理解し、それを明確に表現する
+        上記の指定に沿って、この文章を綺麗に言語化してください。
+
+        1) ユーザーの気持ちや考えを正確に理解し、指定の目的・相手・トーンに合う表現にする
         2) 自然で読みやすい日本語にする
         3) ユーザーの意図を変えずに、より伝わりやすい表現にする
         4) 必要に応じて、曖昧な部分を補完する
-        5) 文章を一つにまとめて、簡潔に表現する
-        6) ポジティブな表現を心がけながらも、ユーザーの本来の感情を尊重する
-        7) 200文字以内に収める
+        5) 文章を一つにまとめて、簡潔に表現する（200文字以内）
 
         【重要】説明や前置きは不要です。整形した文章だけを返してください。
         【重要】「整形した文章：」などのラベルも不要です。文章のみを返してください。

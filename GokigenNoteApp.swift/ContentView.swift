@@ -22,6 +22,7 @@ struct TodayView: View {
                     headerSection
                     questionCard
                     moodCard
+                    reformulationContextCard
                     inputCard
                     actionRow
                     Text("AI枠: \(premium.remainingRewriteQuotaText)")
@@ -98,6 +99,48 @@ struct TodayView: View {
                     }
                 }
                 .pickerStyle(.segmented)
+            }
+        }
+    }
+
+    private var reformulationContextCard: some View {
+        cardContainer {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("伝え方")
+                    .font(.headline)
+                Group {
+                    HStack {
+                        Text("目的")
+                            .frame(width: 56, alignment: .leading)
+                        Picker("目的", selection: $vm.reformulationPurpose) {
+                            ForEach(ReformulationPurpose.allCases) { p in
+                                Text(p.rawValue).tag(p)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                    }
+                    HStack {
+                        Text("相手")
+                            .frame(width: 56, alignment: .leading)
+                        Picker("相手", selection: $vm.reformulationAudience) {
+                            ForEach(ReformulationAudience.allCases) { a in
+                                Text(a.rawValue).tag(a)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                    }
+                    HStack {
+                        Text("トーン")
+                            .frame(width: 56, alignment: .leading)
+                        Picker("トーン", selection: $vm.reformulationTone) {
+                            ForEach(ReformulationTone.allCases) { t in
+                                Text(t.rawValue).tag(t)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                    }
+                }
+                .font(.subheadline)
             }
         }
     }

@@ -41,33 +41,11 @@ struct AuthView: View {
                 .allowsHitTesting(authVM.isLoading)
             )
 
-            // デバッグ表示（タップを絶対に奪わない）
-            .overlay(alignment: .top) {
-                #if DEBUG
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("isLoading: \(authVM.isLoading.description)")
-                    Text("isSignUp: \(isSignUp.description)")
-                    Text("isFormValid: \(isFormValid.description)")
-                }
-                .padding(8)
-                .background(.yellow)
-                .foregroundStyle(.black)
-                .zIndex(9999)
-                .allowsHitTesting(false)
-                #endif
-            }
-
             .background(Color(UIColor.systemGroupedBackground).ignoresSafeArea())
             .navigationTitle(isSignUp ? "新規登録" : "ログイン")
             .navigationBarTitleDisplayMode(.inline)
             .sheet(isPresented: $showPasswordReset) {
                 PasswordResetView(authVM: authVM)
-            }
-            .onAppear {
-                print("Auth isLoading:", authVM.isLoading)
-            }
-            .onChange(of: authVM.isLoading) { _, new in
-                print("Auth isLoading changed:", new)
             }
             .onChange(of: isSignUp) { _, _ in
                 authVM.clearMessages()
