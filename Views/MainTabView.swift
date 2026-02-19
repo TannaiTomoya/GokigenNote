@@ -10,6 +10,7 @@ import SwiftUI
 struct MainTabView: View {
     @StateObject private var vm = GokigenViewModel()
     @StateObject private var trainingVM = TrainingViewModel()
+    @StateObject private var network = NetworkMonitor()
     @ObservedObject var authVM: AuthViewModel
 
     var body: some View {
@@ -44,9 +45,13 @@ struct MainTabView: View {
                     Label("設定", systemImage: "gearshape")
                 }
         }
-        .onAppear {
+        .task(id: authVM.currentUser?.id) {
             vm.setUserId(authVM.currentUser?.id)
             trainingVM.setUserId(authVM.currentUser?.id)
+        }
+        .onChange(of: network.isOnline) { _, isOnline in
+            guard isOnline else { return }
+            vm.flushPending()
         }
     }
 }

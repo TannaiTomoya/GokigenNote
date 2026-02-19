@@ -28,6 +28,11 @@ struct HistoryListView: View {
                     }
                     .buttonStyle(.plain)
                 }
+                if vm.canLoadMore {
+                    ProgressView()
+                        .frame(maxWidth: .infinity)
+                        .task { vm.loadMore() }
+                }
             }
         }
         .listStyle(.insetGrouped)

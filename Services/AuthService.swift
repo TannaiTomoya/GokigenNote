@@ -10,6 +10,23 @@ import UIKit
 import FirebaseAuth
 import FirebaseCore
 
+/// OAuth 認証画面の表示用。UIViewController を AuthUIDelegate として渡すためのラッパー
+private final class AuthUIViewControllerDelegate: NSObject, AuthUIDelegate {
+    weak var viewController: UIViewController?
+
+    init(viewController: UIViewController) {
+        self.viewController = viewController
+    }
+
+    func present(_ viewControllerToPresent: UIViewController, animated flag: Bool, completion: (() -> Void)?) {
+        viewController?.present(viewControllerToPresent, animated: flag, completion: completion)
+    }
+
+    func dismiss(animated flag: Bool, completion: (() -> Void)?) {
+        viewController?.dismiss(animated: flag, completion: completion)
+    }
+}
+
 enum AuthError: LocalizedError {
     case invalidEmail
     case weakPassword
@@ -85,38 +102,9 @@ final class AuthService {
         }
 
         do {
-            let result = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<AuthDataResult, Error>) in
-                var hasResumed = false
-
-                provider.getCredentialWith(rootViewController) { credential, error in
-                    guard !hasResumed else { return }
-
-                    if let error = error {
-                        hasResumed = true
-                        continuation.resume(throwing: error)
-                        return
-                    }
-
-                    guard let credential = credential else {
-                        hasResumed = true
-                        continuation.resume(throwing: AuthError.unknown("認証情報の取得に失敗しました"))
-                        return
-                    }
-
-                    Auth.auth().signIn(with: credential) { authResult, error in
-                        guard !hasResumed else { return }
-                        hasResumed = true
-
-                        if let error = error {
-                            continuation.resume(throwing: error)
-                        } else if let authResult = authResult {
-                            continuation.resume(returning: authResult)
-                        } else {
-                            continuation.resume(throwing: AuthError.unknown("ログインに失敗しました"))
-                        }
-                    }
-                }
-            }
+            let uiDelegate = AuthUIViewControllerDelegate(viewController: rootViewController)
+            let credential = try await provider.credential(with: uiDelegate)
+            let result = try await Auth.auth().signIn(with: credential)
             return result.user
         } catch let error as NSError {
             throw mapFirebaseError(error)
