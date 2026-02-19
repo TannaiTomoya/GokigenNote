@@ -28,19 +28,17 @@ struct AuthView: View {
                 }
                 .padding()
             }
-            // ローディング中だけタップ吸収
-            .overlay {
-                if authVM.isLoading {
-                    ZStack {
-                        Color.black.opacity(0.2).ignoresSafeArea()
-                        ProgressView()
-                            .padding(16)
-                            .background(.ultraThinMaterial)
-                            .clipShape(RoundedRectangle(cornerRadius: 12))
+            // ローディング中だけタップ吸収（overlay 自体を条件分岐）
+            .overlay(
+                Group {
+                    if authVM.isLoading {
+                        ZStack {
+                            Color.black.opacity(0.2).ignoresSafeArea()
+                            ProgressView()
+                        }
                     }
-                    .allowsHitTesting(true)
                 }
-            }
+            )
 
             // デバッグ表示は DEBUG のときだけ（通常時は消す）
             .overlay(alignment: .top) {
