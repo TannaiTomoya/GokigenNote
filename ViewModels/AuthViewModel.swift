@@ -4,6 +4,8 @@
 //
 //  Created by 丹内智弥 on 2025/11/22.
 //
+// isLoading の変更経路を完全トラッキングするためのログ追加。
+// 起動直後に isLoading が true になる原因を特定する目的。
 
 import Foundation
 import SwiftUI
@@ -14,7 +16,7 @@ import FirebaseAuth
 final class AuthViewModel: ObservableObject {
     @Published var currentUser: User?
     @Published var isAuthenticated = false
-    @Published var isLoading = false
+    @Published private(set) var isLoading = false
     @Published var errorMessage: String?
     @Published var successMessage: String?
 
@@ -25,7 +27,13 @@ final class AuthViewModel: ObservableObject {
     private var authStateHandle: AuthStateDidChangeListenerHandle?
 
     init() {
+        print("✅ AuthViewModel init. isLoading=\(isLoading)")
         setupAuthStateListener()
+    }
+
+    private func setLoading(_ value: Bool, _ note: String = "") {
+        isLoading = value
+        print("🔄 isLoading=\(value) \(note)")
     }
 
     deinit {
@@ -63,10 +71,10 @@ final class AuthViewModel: ObservableObject {
     // MARK: - Sign Up
 
     func signUp(email: String, password: String) async {
-        isLoading = true
+        setLoading(true, "signUp start")
         errorMessage = nil
         successMessage = nil
-        defer { isLoading = false }
+        defer { setLoading(false, "signUp end") }
 
         do {
             _ = try await authService.signUp(email: email, password: password)
@@ -80,10 +88,10 @@ final class AuthViewModel: ObservableObject {
     // MARK: - Sign In
 
     func signIn(email: String, password: String) async {
-        isLoading = true
+        setLoading(true, "signIn start")
         errorMessage = nil
         successMessage = nil
-        defer { isLoading = false }
+        defer { setLoading(false, "signIn end") }
 
         do {
             _ = try await authService.signIn(email: email, password: password)
@@ -97,10 +105,10 @@ final class AuthViewModel: ObservableObject {
     // MARK: - Google Sign In
 
     func signInWithGoogle() async {
-        isLoading = true
+        setLoading(true, "Google start")
         errorMessage = nil
         successMessage = nil
-        defer { isLoading = false }
+        defer { setLoading(false, "Google end") }
 
         do {
             _ = try await authService.signInWithGoogle()
@@ -114,10 +122,10 @@ final class AuthViewModel: ObservableObject {
     // MARK: - Password Reset
 
     func resetPassword(email: String) async -> Bool {
-        isLoading = true
+        setLoading(true, "resetPassword start")
         errorMessage = nil
         successMessage = nil
-        defer { isLoading = false }
+        defer { setLoading(false, "resetPassword end") }
 
         do {
             try await authService.resetPassword(email: email)

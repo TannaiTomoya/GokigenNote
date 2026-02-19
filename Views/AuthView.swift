@@ -33,13 +33,33 @@ struct AuthView: View {
                 }
                 .padding()
             }
+            .overlay(alignment: .top) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("isLoading: \(authVM.isLoading.description)")
+                    Text("isSignUp: \(isSignUp.description)")
+                    Text("isFormValid: \(isFormValid.description)")
+                }
+                .padding(8)
+                .background(.yellow)
+                .foregroundStyle(.black)
+                .zIndex(9999)
+            }
             .background(Color(.systemGroupedBackground).ignoresSafeArea())
             .navigationTitle(isSignUp ? "新規登録" : "ログイン")
             .navigationBarTitleDisplayMode(.inline)
-            .disabled(authVM.isLoading)
+            .overlay {
+                if authVM.isLoading {
+                    ZStack {
+                        Color.black.opacity(0.2).ignoresSafeArea()
+                        ProgressView()
+                    }
+                }
+            }
             .sheet(isPresented: $showPasswordReset) {
                 PasswordResetView(authVM: authVM)
             }
+            .onAppear { print("Auth isLoading:", authVM.isLoading) }
+            .onChange(of: authVM.isLoading) { _, new in print("Auth isLoading changed:", new) }
             .onChange(of: isSignUp) {
                 authVM.clearMessages()
             }
