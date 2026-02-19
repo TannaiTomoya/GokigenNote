@@ -8,13 +8,6 @@
 import SwiftUI
 import FirebaseCore
 
-/// 一時的: ログイン後のクラッシュ原因を MainTabView 配下に絞るための仮 View
-private struct PostLoginDebugView: View {
-    var body: some View {
-        Text("Logged in OK")
-    }
-}
-
 @main
 struct GokigenNoteApp: App {
     @StateObject private var authVM = AuthViewModel()
@@ -28,9 +21,7 @@ struct GokigenNoteApp: App {
         WindowGroup {
             Group {
                 if authVM.isAuthenticated {
-                    // 一時的: MainTabView の代わりに仮 View でクラッシュ箇所を切り分け
-                    PostLoginDebugView()
-                    // MainTabView(authVM: authVM)
+                    MainTabView(authVM: authVM)
                 } else {
                     AuthView(authVM: authVM)
                 }
