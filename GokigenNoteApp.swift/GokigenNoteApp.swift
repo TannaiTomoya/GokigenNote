@@ -29,7 +29,8 @@ private struct PostLoginDebugView: View {
 struct GokigenNoteApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) var delegate
     @StateObject private var authVM = AuthViewModel()
-    
+    @StateObject private var paywall = PaywallCoordinator.shared
+
     init() {
         // Firebase初期化
         //FirebaseManager.shared.configure()
@@ -45,6 +46,17 @@ struct GokigenNoteApp: App {
                 } else {
                     AuthView(authVM: authVM)
                 }
+            }
+            .task {
+                PremiumManager.shared.start()
+            }
+            .sheet(isPresented: Binding(
+                get: { paywall.isPresented },
+                set: { newValue in
+                    if !newValue { paywall.dismiss() }
+                }
+            )) {
+                PaywallView()
             }
             .onAppear {
                 print("🏁 [GokigenNoteApp] アプリ起動")

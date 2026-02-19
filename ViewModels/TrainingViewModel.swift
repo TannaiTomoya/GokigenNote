@@ -28,7 +28,7 @@ final class TrainingViewModel: ObservableObject {
         calculateStreak()
     }
 
-    func setUserId(_ userId: String?) {
+    func setUserId(_ userId: String) {
         guard currentUserId != userId else { return }
         currentUserId = userId
     }

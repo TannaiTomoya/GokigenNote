@@ -32,4 +32,9 @@ enum EmpathyEngine {
             )
         }
     }
+
+    /// API 未使用時の言い換えフォールバック（Phase 3）。入力のトリムのみの簡易版。
+    static func reformulateLocal(original: String) -> String {
+        original.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
 }

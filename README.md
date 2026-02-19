@@ -59,7 +59,7 @@ GokigenNote/
 
 ## 🔐 Gemini API の設定（オプション）
 
-1. [Google AI Studio](https://makersuite.google.com/app/apikey) でAPIキーを取得
+1. [Google AI Studio](https://aistudio.google.com/apikey) で API キーを取得（言い換え・共感メッセージに必要。未設定時はローカル処理のみ）
 
 2. **方法1: 環境変数で設定（推奨）**
 
@@ -146,9 +146,8 @@ open GokigenNote.xcodeproj
 
 ## 🔒 プライバシー
 
-- すべてのデータはデバイス内（UserDefaults）に保存
-- クラウド同期なし
-- Gemini API使用時のみ、テキストが外部送信される
+- ログイン後は記録データがFirestoreクラウドに保存されます
+- 「言い換えをつくる」「共感メッセージ」等の利用時、入力テキストは **Google の AI（Gemini API）** に送信され、結果表示のためだけに利用されます（Google の[利用規約](https://ai.google.dev/terms)・[プライバシーポリシー](https://policies.google.com/privacy)に従います）
 - エクスポート機能で自分でバックアップ可能
 
 ## 🤝 コントリビューション

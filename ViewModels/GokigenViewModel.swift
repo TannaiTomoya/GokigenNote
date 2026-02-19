@@ -31,6 +31,127 @@ final class GokigenViewModel: ObservableObject {
         static let emptyDraft = "まず一言だけ書いてみませんか？"
         static let offlineFallback = "今は手元のアイデアで続けるね。"
         static let reformulationError = "言い換えに失敗しました。もう一度お試しください。"
+        static let dailyLimitReached = "本日の利用回数に達したため、簡易表示しています。"
+        static let fallbackReformulation = "通信のため簡易表示しています。"
+    }
+
+    /// 1日あたりの Gemini API 呼び出し上限（Phase 2）
+    private static let dailyAPICallLimit = 30
+    /// 言い換えキャッシュの最大件数（Phase 1）
+    private static let reformulationCacheMaxCount = 50
+
+    private var reformulationCache: [String: String] = [:]
+    private var reformulationCacheOrder: [String] = []
+
+    // “古いレスポンスがUIを上書き”防止用
+    private var empathyRequestID: UUID?
+    private var reformulationRequestID: UUID?
+
+    // 同時実行防止（共通枠）
+    private var aiLock = false
+
+    private struct AIRequestToken {
+        let id: UUID
+        let kind: Kind
+        enum Kind { case empathy, reformulation }
+    }
+
+    @MainActor
+    private func beginAIRequest(kind: AIRequestToken.Kind) -> AIRequestToken? {
+        if aiLock { return nil }
+        if isLoadingEmpathy || isLoadingReformulation { return nil }
+
+        aiLock = true
+        let token = AIRequestToken(id: UUID(), kind: kind)
+
+        switch kind {
+        case .empathy:
+            empathyRequestID = token.id
+            isLoadingEmpathy = true
+        case .reformulation:
+            reformulationRequestID = token.id
+            isLoadingReformulation = true
+        }
+        return token
+    }
+
+    @MainActor
+    private func endAIRequest(_ token: AIRequestToken) {
+        switch token.kind {
+        case .empathy:
+            guard empathyRequestID == token.id else { return }
+            empathyRequestID = nil
+            isLoadingEmpathy = false
+        case .reformulation:
+            guard reformulationRequestID == token.id else { return }
+            reformulationRequestID = nil
+            isLoadingReformulation = false
+        }
+        aiLock = false
+    }
+
+    /// ここでは “消費しない”。不足なら Paywall（Coordinator が throttle を担当）
+    @MainActor
+    private func ensureQuotaOrOpenPaywall() -> Bool {
+        let pm = PremiumManager.shared
+        guard pm.canConsumeRewriteQuota() else {
+            publishError(message: "回数上限に達しました（\(pm.remainingRewriteQuotaText)）。プレミアムで無制限にできます。")
+            PaywallCoordinator.shared.present()
+            return false
+        }
+        return true
+    }
+
+    /// 実際にGeminiを叩く直前にだけ消費
+    @MainActor
+    private func consumeQuota() {
+        PremiumManager.shared.consumeRewriteQuota()
+    }
+
+    private static func dateString(_ date: Date) -> String {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = .current
+        f.dateFormat = "yyyy-MM-dd"
+        return f.string(from: date)
+    }
+
+    private func canCallGeminiAPI(now: Date = .now) -> Bool {
+        let keyDate = "GeminiAPIDailyDate"
+        let keyCount = "GeminiAPIDailyCount"
+        let today = Self.dateString(now)
+
+        if UserDefaults.standard.string(forKey: keyDate) != today {
+            UserDefaults.standard.set(today, forKey: keyDate)
+            UserDefaults.standard.set(0, forKey: keyCount)
+        }
+        let count = UserDefaults.standard.integer(forKey: keyCount)
+        return count < Self.dailyAPICallLimit
+    }
+
+    private func recordGeminiAPICall(now: Date = .now) {
+        let keyDate = "GeminiAPIDailyDate"
+        let keyCount = "GeminiAPIDailyCount"
+        let today = Self.dateString(now)
+
+        if UserDefaults.standard.string(forKey: keyDate) != today {
+            UserDefaults.standard.set(today, forKey: keyDate)
+            UserDefaults.standard.set(0, forKey: keyCount)
+        }
+        let count = UserDefaults.standard.integer(forKey: keyCount)
+        UserDefaults.standard.set(count + 1, forKey: keyCount)
+    }
+
+    /// 言い換え結果をキャッシュに追加（最大件数で古いものを削除）（Phase 1）
+    private func setReformulationCache(input: String, result: String) {
+        if reformulationCacheOrder.count >= Self.reformulationCacheMaxCount, let first = reformulationCacheOrder.first {
+            reformulationCacheOrder.removeFirst()
+            reformulationCache.removeValue(forKey: first)
+        }
+        if !reformulationCacheOrder.contains(input) {
+            reformulationCacheOrder.append(input)
+        }
+        reformulationCache[input] = result
     }
 
     private let persistence = Persistence.shared
@@ -71,8 +192,7 @@ final class GokigenViewModel: ObservableObject {
         self.entries = []
     }
 
-    func setUserId(_ userId: String?) {
-        guard let userId else { return }
+    func setUserId(_ userId: String) {
         guard currentUserId != userId else { return }
         currentUserId = userId
 
@@ -249,11 +369,12 @@ final class GokigenViewModel: ObservableObject {
             return
         }
 
-        // まずローカルの言い換えを即時反映
+        // ローカル即時反映
         let local = EmpathyEngine.rewrite(original: trimmed, mood: selectedMood)
         empathyDraft = local.0
         nextStepDraft = local.1
 
+        // キャッシュヒットは0消費
         if !forceRefresh,
            let cache = lastGeminiSuccess,
            cache.text == trimmed {
@@ -262,34 +383,50 @@ final class GokigenViewModel: ObservableObject {
             return
         }
 
-        if isLoadingEmpathy { return }
+        // 日次上限は0消費で終了
+        guard canCallGeminiAPI() else {
+            publishError(message: Copy.dailyLimitReached)
+            return
+        }
 
-        isLoadingEmpathy = true
+        // 課金枠が無ければPaywall（まだ消費しない）
+        guard ensureQuotaOrOpenPaywall() else { return }
+
+        // リクエスト開始（解除漏れをdeferで潰す）
+        guard let token = beginAIRequest(kind: .empathy) else { return }
+
+        // ここで初めて消費＆APIカウント
+        consumeQuota()
+        recordGeminiAPICall()
+
         lastGeminiRequest = trimmed
 
         Task {
+            defer { Task { @MainActor in self.endAIRequest(token) } }
+
             do {
                 let response = try await geminiService.generateEmpathy(for: trimmed)
                 await MainActor.run {
+                    guard self.empathyRequestID == token.id else { return }
                     guard self.lastGeminiRequest == trimmed else { return }
+
                     self.empathyDraft = response.empathy
                     self.nextStepDraft = response.nextStep
                     self.lastGeminiSuccess = (text: trimmed, response: response)
                     self.lastGeminiRequest = nil
-                    self.isLoadingEmpathy = false
                 }
             } catch {
                 await MainActor.run {
+                    guard self.empathyRequestID == token.id else { return }
                     guard self.lastGeminiRequest == trimmed else { return }
+
                     self.publishError(message: Copy.offlineFallback)
                     self.lastGeminiRequest = nil
-                    self.isLoadingEmpathy = false
                 }
             }
         }
     }
     
-    // 言語化機能
     @MainActor
     func reformulateText() {
         let trimmed = draftText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -298,23 +435,46 @@ final class GokigenViewModel: ObservableObject {
             return
         }
 
-        if isLoadingReformulation { return }
+        // キャッシュヒットは0消費
+        if let cached = reformulationCache[trimmed] {
+            reformulatedText = cached
+            return
+        }
 
-        isLoadingReformulation = true
+        // 日次上限は0消費でローカル簡易
+        guard canCallGeminiAPI() else {
+            reformulatedText = EmpathyEngine.reformulateLocal(original: trimmed)
+            publishError(message: Copy.dailyLimitReached)
+            return
+        }
+
+        // 課金枠が無ければPaywall（まだ消費しない）
+        guard ensureQuotaOrOpenPaywall() else { return }
+
+        // リクエスト開始
+        guard let token = beginAIRequest(kind: .reformulation) else { return }
+
+        // ここで初めて消費＆APIカウント
+        consumeQuota()
+        recordGeminiAPICall()
 
         Task {
+            defer { Task { @MainActor in self.endAIRequest(token) } }
+
             do {
                 let reformulated = try await geminiService.reformulateText(for: trimmed)
                 await MainActor.run {
+                    guard self.reformulationRequestID == token.id else { return }
+
                     self.reformulatedText = reformulated
-                    self.isLoadingReformulation = false
-                    print("✅ [GokigenViewModel] 言い換え成功: \(reformulated.prefix(50))...")
+                    self.setReformulationCache(input: trimmed, result: reformulated)
                 }
             } catch {
                 await MainActor.run {
-                    print("❌ [GokigenViewModel] 言い換えエラー: \(error.localizedDescription)")
-                    self.publishError(message: Copy.reformulationError)
-                    self.isLoadingReformulation = false
+                    guard self.reformulationRequestID == token.id else { return }
+
+                    self.reformulatedText = EmpathyEngine.reformulateLocal(original: trimmed)
+                    self.publishError(message: Copy.fallbackReformulation)
                 }
             }
         }

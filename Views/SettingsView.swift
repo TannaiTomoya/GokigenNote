@@ -10,6 +10,7 @@ import SwiftUI
 struct SettingsView: View {
     @ObservedObject var vm: GokigenViewModel
     @ObservedObject var authVM: AuthViewModel
+    @StateObject private var premium = PremiumManager.shared
     @State private var exportText: String = ""
     @State private var isSharePresented = false
     @State private var showDeleteAlert = false
@@ -37,6 +38,23 @@ struct SettingsView: View {
                     } header: {
                         Text("アカウント")
                     }
+                }
+
+                // プレミアム（Root の sheet で同じ PaywallView を表示）
+                Section {
+                    Button {
+                        PaywallCoordinator.shared.present()
+                    } label: {
+                        HStack {
+                            Label("プレミアム", systemImage: "crown.fill")
+                            Spacer()
+                            Text(premium.remainingRewriteQuotaText)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                } header: {
+                    Text("課金")
                 }
                 
                 // データ管理セクション
@@ -105,7 +123,7 @@ struct SettingsView: View {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("プライバシーについて")
                             .font(.headline)
-                        Text("ログイン後、データはFirestoreクラウドに保存されます。Gemini API使用時は、テキストが外部送信されます。")
+                        Text("ログイン後、データはFirestoreクラウドに保存されます。「言い換えをつくる」等の機能利用時は、入力テキストがGoogleのAI（Gemini API）に送信され、処理後に結果が返ります。送信データはGoogleのプライバシーポリシーに従って取り扱われます。")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }

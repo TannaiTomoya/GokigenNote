@@ -11,6 +11,7 @@ import UIKit
 
 struct TodayView: View {
     @ObservedObject var vm: GokigenViewModel
+    @StateObject private var premium = PremiumManager.shared
     @State private var showCopyToast = false
     @State private var shareItem: ShareItem?
 
@@ -23,6 +24,9 @@ struct TodayView: View {
                     moodCard
                     inputCard
                     actionRow
+                    Text("AI枠: \(premium.remainingRewriteQuotaText)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                     TrendCard(snapshot: vm.trendSnapshot)
                 }
                 .padding()
@@ -119,7 +123,7 @@ struct TodayView: View {
                         )
                         .accessibilityHint("感じたことを自由に入力できます")
                 }
-                
+
                 // 言語化された文章を表示
                 if !vm.reformulatedText.isEmpty {
                     VStack(alignment: .leading, spacing: 8) {
@@ -138,7 +142,7 @@ struct TodayView: View {
                                 }
                                 .buttonStyle(.bordered)
                                 .buttonBorderShape(.circle)
-                                
+
                                 Button(action: { shareReformulatedText() }) {
                                     Label("共有", systemImage: "square.and.arrow.up")
                                         .font(.caption)
@@ -152,11 +156,13 @@ struct TodayView: View {
                             .font(.body)
                             .padding()
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(Color(.tertiarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
+                            .background(
+                                Color(.tertiarySystemBackground),
+                                in: RoundedRectangle(cornerRadius: 12))
                     }
                     .transition(.opacity.combined(with: .move(edge: .top)))
                 }
-                
+
                 Button(action: vm.saveCurrentEntry) {
                     Text("この一言を記録する")
                         .frame(maxWidth: .infinity)
@@ -190,7 +196,10 @@ struct TodayView: View {
                 .frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
-            .disabled(vm.isLoadingReformulation || vm.draftText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            .disabled(
+                vm.isLoadingReformulation
+                    || vm.draftText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            )
             .accessibilityHint("入力文をより綺麗に言語化します")
         }
     }
@@ -203,9 +212,9 @@ struct TodayView: View {
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
         .shadow(color: Color.black.opacity(0.05), radius: 8, y: 4)
     }
-    
+
     // MARK: - Helper Functions
-    
+
     private func copyReformulatedText() {
         UIPasteboard.general.string = vm.reformulatedText
         showCopyToast = true
@@ -213,7 +222,7 @@ struct TodayView: View {
             showCopyToast = false
         }
     }
-    
+
     private func shareReformulatedText() {
         guard !vm.reformulatedText.isEmpty else { return }
         shareItem = ShareItem(text: vm.reformulatedText)
@@ -231,7 +240,7 @@ struct ShareItem: Identifiable {
 
 struct ActivityViewController: UIViewControllerRepresentable {
     let activityItems: [Any]
-    
+
     func makeUIViewController(context: Context) -> UIActivityViewController {
         let controller = UIActivityViewController(
             activityItems: activityItems,
@@ -239,7 +248,7 @@ struct ActivityViewController: UIViewControllerRepresentable {
         )
         return controller
     }
-    
+
     func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
 }
 
@@ -250,12 +259,13 @@ struct ShareSheet: UIViewControllerRepresentable {
     var applicationActivities: [UIActivity]? = nil
 
     func makeUIViewController(context: Context) -> UIActivityViewController {
-        let controller = UIActivityViewController(activityItems: activityItems, applicationActivities: applicationActivities)
+        let controller = UIActivityViewController(
+            activityItems: activityItems, applicationActivities: applicationActivities)
         controller.excludedActivityTypes = [.assignToContact]
         return controller
     }
 
-    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) { }
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
 }
 
 // MARK: - History Row
@@ -279,7 +289,9 @@ struct HistoryRow: View {
         .padding()
         .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14))
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(entry.date.formatted(date: .abbreviated, time: .omitted))の記録。気分は\(entry.mood.label)。\(entry.originalText)")
+        .accessibilityLabel(
+            "\(entry.date.formatted(date: .abbreviated, time: .omitted))の記録。気分は\(entry.mood.label)。\(entry.originalText)"
+        )
     }
 }
 
@@ -309,7 +321,8 @@ struct TrendCard: View {
         .shadow(color: Color.black.opacity(0.05), radius: 8, y: 4)
         .animation(.easeInOut(duration: 0.3), value: snapshot.dominantEmoji)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("最近の傾向。平均スコアは\(String(format: "%.1f", snapshot.averageScore))。\(snapshot.feedback)")
+        .accessibilityLabel(
+            "最近の傾向。平均スコアは\(String(format: "%.1f", snapshot.averageScore))。\(snapshot.feedback)")
     }
 }
 
@@ -331,14 +344,17 @@ struct ToastBanner: View {
             }
         }
     }
-    
+
     let message: String
     let style: Style
-    
+
     var body: some View {
         HStack {
-            Image(systemName: style == .success ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
-                .foregroundStyle(style.tint)
+            Image(
+                systemName: style == .success
+                    ? "checkmark.circle.fill" : "exclamationmark.triangle.fill"
+            )
+            .foregroundStyle(style.tint)
             Text(message)
                 .foregroundStyle(.primary)
                 .multilineTextAlignment(.leading)

@@ -46,8 +46,13 @@ struct MainTabView: View {
                 }
         }
         .task(id: authVM.currentUser?.id) {
-            vm.setUserId(authVM.currentUser?.id)
-            trainingVM.setUserId(authVM.currentUser?.id)
+            guard let userId = authVM.currentUser?.id else {
+                print("⚠️ userId is nil. skip setUserId")
+                return
+            }
+            print("✅ setUserId:", userId)
+            vm.setUserId(userId)
+            trainingVM.setUserId(userId)
         }
         .onChange(of: network.isOnline) { _, isOnline in
             guard isOnline else { return }

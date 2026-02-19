@@ -21,7 +21,7 @@ final class GeminiService {
 
     init() {
         if let apiKey = APIKey.gemini, !apiKey.isEmpty {
-            self.model = GenerativeModel(name: "gemini-2.5-flash-lite", apiKey: apiKey)
+            self.model = GenerativeModel(name: "gemini-2.0-flash", apiKey: apiKey)
         } else {
             self.model = nil
             logger.info("Gemini API key not configured. Using local fallback.")
