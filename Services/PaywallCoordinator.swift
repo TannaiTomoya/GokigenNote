@@ -11,8 +11,6 @@ import SwiftUI
 
 @MainActor
 final class PaywallCoordinator: ObservableObject {
-    let objectWillChange = ObservableObjectPublisher()
-
     static let shared = PaywallCoordinator()
 
     @Published private(set) var isPresented: Bool = false
@@ -30,13 +28,11 @@ final class PaywallCoordinator: ObservableObject {
         if now.timeIntervalSince(lastPresentedAt) < throttleSeconds { return }
 
         lastPresentedAt = now
-        objectWillChange.send()
         isPresented = true
         presentCount += 1
     }
 
     func dismiss() {
-        objectWillChange.send()
         isPresented = false
     }
 }
