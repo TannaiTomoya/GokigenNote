@@ -9,6 +9,7 @@
 import Foundation
 import StoreKit
 import Combine
+import SwiftUI
 
 enum Plan: Equatable {
     case free
@@ -46,7 +47,6 @@ enum UsageKey {
     }
 }
 
-@MainActor
 final class PremiumManager: ObservableObject {
     static let shared = PremiumManager()
 
@@ -64,6 +64,7 @@ final class PremiumManager: ObservableObject {
     private init() {}
 
     /// App起動時に1回だけ呼ぶ想定
+    @MainActor
     func start() {
         guard !hasStarted else { return }
         hasStarted = true
@@ -82,6 +83,7 @@ final class PremiumManager: ObservableObject {
 
     // MARK: - Products
 
+    @MainActor
     func loadProducts() async {
         do {
             let storeProducts = try await Product.products(for: Array(ProductID.all))
@@ -94,6 +96,7 @@ final class PremiumManager: ObservableObject {
 
     // MARK: - Purchase / Restore
 
+    @MainActor
     func purchase(_ product: Product) async {
         lastError = nil
         isLoading = true
@@ -123,6 +126,7 @@ final class PremiumManager: ObservableObject {
         }
     }
 
+    @MainActor
     func restore() async {
         lastError = nil
         isLoading = true
@@ -139,6 +143,7 @@ final class PremiumManager: ObservableObject {
     // MARK: - Entitlements
 
     /// 現在の権利状態を再計算して plan を確定
+    @MainActor
     func refreshEntitlements(now: Date = .now) async {
         // refreshで lastError を毎回消すと、表示中のエラーが消えてUXが揺れるので消さない（必要なら呼び出し側で消す）
         var newOwned: Set<String> = []

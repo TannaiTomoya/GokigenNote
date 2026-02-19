@@ -5,13 +5,11 @@
 //  アプリ全体で1つの Paywall sheet を制御。多重 present を抑止し、Root で .sheet を1箇所だけ持つ。
 //
 
+import Foundation
 import Combine
 import SwiftUI
 
 final class PaywallCoordinator: ObservableObject {
-    nonisolated var objectWillChange: ObservableObjectPublisher { _objectWillChange }
-    private let _objectWillChange = ObservableObjectPublisher()
-
     static let shared = PaywallCoordinator()
 
     @Published private(set) var isPresented: Bool = false
