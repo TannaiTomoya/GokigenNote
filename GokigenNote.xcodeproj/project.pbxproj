@@ -7,9 +7,9 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		A808D9AA2F4723F200D9922F /* GokigenNote-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = A86407E12ED1BF73005DD4B1 /* GokigenNote-Info.plist */; };
 		A86406162ED02F1D005DD4B1 /* GoogleGenerativeAI in Frameworks */ = {isa = PBXBuildFile; productRef = A86406152ED02F1D005DD4B1 /* GoogleGenerativeAI */; };
 		A86407D62ED1AD02005DD4B1 /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = A86407D52ED1AD02005DD4B1 /* FirebaseAuth */; };
-
 		A86407DE2ED1BA41005DD4B1 /* FirebaseCore in Frameworks */ = {isa = PBXBuildFile; productRef = A86407DD2ED1BA41005DD4B1 /* FirebaseCore */; };
 		A86407E02ED1BA41005DD4B1 /* FirebaseFirestore in Frameworks */ = {isa = PBXBuildFile; productRef = A86407DF2ED1BA41005DD4B1 /* FirebaseFirestore */; };
 /* End PBXBuildFile section */
@@ -52,7 +52,6 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				A86407D82ED1AD02005DD4B1 /* FirebaseDatabase in Frameworks */,
 				A86406162ED02F1D005DD4B1 /* GoogleGenerativeAI in Frameworks */,
 				A86407DE2ED1BA41005DD4B1 /* FirebaseCore in Frameworks */,
 				A86407E02ED1BA41005DD4B1 /* FirebaseFirestore in Frameworks */,
@@ -160,6 +159,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A808D9AA2F4723F200D9922F /* GokigenNote-Info.plist in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
