@@ -8,6 +8,7 @@
 
 import Foundation
 import StoreKit
+import Combine
 
 enum Plan: Equatable {
     case free
@@ -180,7 +181,7 @@ final class PremiumManager: ObservableObject {
             do {
                 let t = try verify(update)
                 await t.finish()
-                await MainActor.run {
+                _ = await MainActor.run {
                     Task { @MainActor in
                         await self.refreshEntitlements()
                     }
