@@ -28,7 +28,7 @@ struct AuthView: View {
                 }
                 .padding()
             }
-            // ローディング中だけタップ吸収（overlay 自体を条件分岐）
+            // ローディング中だけ表示し、その時だけタップを吸う
             .overlay(
                 Group {
                     if authVM.isLoading {
@@ -38,9 +38,10 @@ struct AuthView: View {
                         }
                     }
                 }
+                .allowsHitTesting(authVM.isLoading)
             )
 
-            // デバッグ表示は DEBUG のときだけ（通常時は消す）
+            // デバッグ表示（タップを絶対に奪わない）
             .overlay(alignment: .top) {
                 #if DEBUG
                 VStack(alignment: .leading, spacing: 4) {

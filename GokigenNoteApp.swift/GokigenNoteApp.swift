@@ -18,6 +18,13 @@ class AppDelegate: NSObject, UIApplicationDelegate {
 }
 
 
+/// 一時的: ログイン後のクラッシュ原因を MainTabView 配下に絞るための仮 View
+private struct PostLoginDebugView: View {
+    var body: some View {
+        Text("Logged in OK")
+    }
+}
+
 @main
 struct GokigenNoteApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) var delegate
@@ -32,7 +39,9 @@ struct GokigenNoteApp: App {
         WindowGroup {
             Group {
                 if authVM.isAuthenticated {
-                    MainTabView(authVM: authVM)
+                    // 一時的: MainTabView の代わりに仮 View でクラッシュ箇所を切り分け
+                    PostLoginDebugView()
+                    // MainTabView(authVM: authVM)
                 } else {
                     AuthView(authVM: authVM)
                 }
