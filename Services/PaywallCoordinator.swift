@@ -9,7 +9,6 @@ import Foundation
 import Combine
 import SwiftUI
 
-@MainActor
 final class PaywallCoordinator: ObservableObject {
     static let shared = PaywallCoordinator()
 
@@ -21,6 +20,7 @@ final class PaywallCoordinator: ObservableObject {
     private init() {}
 
     /// どこから呼ばれても安全に “一回だけ” 出す
+    @MainActor
     func present(throttleSeconds: TimeInterval = 0.8) {
         if isPresented { return }
 
@@ -32,6 +32,7 @@ final class PaywallCoordinator: ObservableObject {
         presentCount += 1
     }
 
+    @MainActor
     func dismiss() {
         isPresented = false
     }
