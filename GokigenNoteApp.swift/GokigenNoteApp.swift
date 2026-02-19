@@ -8,16 +8,6 @@
 import SwiftUI
 import FirebaseCore
 
-class AppDelegate: NSObject, UIApplicationDelegate {
-  func application(_ application: UIApplication,
-                   didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey : Any]? = nil) -> Bool {
-//    FirebaseApp.configure()
-      FirebaseManager.shared.configure()
-    return true
-  }
-}
-
-
 /// 一時的: ログイン後のクラッシュ原因を MainTabView 配下に絞るための仮 View
 private struct PostLoginDebugView: View {
     var body: some View {
@@ -27,13 +17,11 @@ private struct PostLoginDebugView: View {
 
 @main
 struct GokigenNoteApp: App {
-    @UIApplicationDelegateAdaptor(AppDelegate.self) var delegate
     @StateObject private var authVM = AuthViewModel()
-    @StateObject private var paywall = PaywallCoordinator.shared
+    @ObservedObject private var paywall = PaywallCoordinator.shared
 
     init() {
-        // Firebase初期化
-        //FirebaseManager.shared.configure()
+        FirebaseApp.configure()
     }
     
     var body: some Scene {

@@ -12,10 +12,9 @@ import FirebaseAuth
 final class FirebaseManager {
     static let shared = FirebaseManager()
     
-    private init() {
-        configure()
-    }
-    
+    private init() {}
+
+    /// Firebase 初期化は GokigenNoteApp.init() で FirebaseApp.configure() を1回だけ呼ぶ方針。二重実行防止用。
     func configure() {
         if FirebaseApp.app() == nil {
             FirebaseApp.configure()
