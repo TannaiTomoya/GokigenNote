@@ -145,7 +145,6 @@ final class TrainingViewModel: ObservableObject {
     }
 
     private func saveToFirestore(_ session: TrainingSession, for userId: String) async throws {
-        let db = firestoreService
         // Firestoreに保存するためのデータ構造
         // FirestoreServiceに将来的にtraining用メソッドを追加可能
         // 現時点ではローカル保存のみで十分
