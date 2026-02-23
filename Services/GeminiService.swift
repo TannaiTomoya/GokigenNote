@@ -36,8 +36,9 @@ actor GeminiClient {
         self.model = GenerativeModel(name: modelName, apiKey: apiKey)
     }
 
-    func generate(_ prompt: String) async throws -> GenerateContentResponse {
-        try await model.generateContent(prompt)
+    func generateText(_ prompt: String) async throws -> String {
+        let response = try await model.generateContent(prompt)
+        return response.text ?? ""
     }
 }
 
@@ -84,14 +85,13 @@ final class GeminiService {
         print("[Gemini] API Request: generateEmpathy, text=\(text)")
 
         do {
-            let response = try await withTimeout(15) { [client] in
-                try await client.generate(prompt)
+            let raw = try await withTimeout(15) { [client] in
+                try await client.generateText(prompt)
             }
             print("[Gemini] API Response: empathy, ok")
-            print("[Gemini] TEXT: \(response.text ?? "nil")")
+            print("[Gemini] TEXT: \(raw.isEmpty ? "empty" : raw)")
             logger.info("Empathy generation completed.")
 
-            let raw = response.text ?? ""
             if raw.isEmpty {
                 print("[Gemini] WARN: response.text is empty")
             }
@@ -133,7 +133,7 @@ final class GeminiService {
         }
     }
 
-    func reformulateText(for text: String, context: ReformulationContext = .default) async throws -> String {
+    func reformulateText(for text: String, context: ReformulationContext) async throws -> String {
         guard let client else { throw GeminiError.apiKeyNotAvailable }
 
         logger.info("Requesting text reformulation...")
@@ -162,16 +162,16 @@ final class GeminiService {
         print("[Gemini] API Request: reformulateText, text=\(text), purpose=\(context.purpose.rawValue), audience=\(context.audience.rawValue), tone=\(context.tone.rawValue)")
 
         do {
-            let response = try await withTimeout(15) { [client] in
-                try await client.generate(prompt)
+            let raw = try await withTimeout(15) { [client] in
+                try await client.generateText(prompt)
             }
             print("[Gemini] API Response: reformulateText, ok")
-            print("[Gemini] TEXT: \(response.text ?? "nil")")
+            print("[Gemini] TEXT: \(raw.isEmpty ? "empty" : raw)")
             logger.info("Text reformulation completed.")
 
-            var reformulatedText = response.text ?? text
-            if reformulatedText.isEmpty {
-                print("[Gemini] WARN: response.text is empty")
+            var reformulatedText = raw.isEmpty ? text : raw
+            if raw.isEmpty {
+                print("[Gemini] WARN: response.text is empty, using input as fallback")
             }
 
             let unwantedPrefixes = [

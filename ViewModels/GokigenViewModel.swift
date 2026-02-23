@@ -80,17 +80,20 @@ final class GokigenViewModel: ObservableObject {
 
     @MainActor
     private func endAIRequest(_ token: AIRequestToken) {
+        defer { aiLock = false }
+
         switch token.kind {
         case .empathy:
-            guard empathyRequestID == token.id else { return }
-            empathyRequestID = nil
-            isLoadingEmpathy = false
+            if empathyRequestID == token.id {
+                empathyRequestID = nil
+                isLoadingEmpathy = false
+            }
         case .reformulation:
-            guard reformulationRequestID == token.id else { return }
-            reformulationRequestID = nil
-            isLoadingReformulation = false
+            if reformulationRequestID == token.id {
+                reformulationRequestID = nil
+                isLoadingReformulation = false
+            }
         }
-        aiLock = false
     }
 
     /// ここでは “消費しない”。不足なら Paywall（Coordinator が throttle を担当）
@@ -409,14 +412,13 @@ final class GokigenViewModel: ObservableObject {
 
         lastGeminiRequest = trimmed
 
-        Task {
+        Task { [trimmed, token] in
             defer { Task { @MainActor in self.endAIRequest(token) } }
 
             do {
                 let response = try await geminiService.generateEmpathy(for: trimmed)
                 await MainActor.run {
                     guard self.empathyRequestID == token.id else { return }
-                    guard self.lastGeminiRequest == trimmed else { return }
 
                     self.empathyDraft = response.empathy
                     self.nextStepDraft = response.nextStep
@@ -424,9 +426,9 @@ final class GokigenViewModel: ObservableObject {
                     self.lastGeminiRequest = nil
                 }
             } catch {
+                print("[Gemini] ERROR generateEmpathy: \(error)")
                 await MainActor.run {
                     guard self.empathyRequestID == token.id else { return }
-                    guard self.lastGeminiRequest == trimmed else { return }
 
                     self.publishError(message: Copy.offlineFallback)
                     self.lastGeminiRequest = nil
@@ -473,7 +475,7 @@ final class GokigenViewModel: ObservableObject {
         consumeQuota()
         recordGeminiAPICall()
 
-        Task {
+        Task { [trimmed, token, context, cacheKey] in
             defer { Task { @MainActor in self.endAIRequest(token) } }
 
             do {
@@ -485,6 +487,7 @@ final class GokigenViewModel: ObservableObject {
                     self.setReformulationCache(cacheKey: cacheKey, result: reformulated)
                 }
             } catch {
+                print("[Gemini] ERROR reformulateText: \(error)")
                 await MainActor.run {
                     guard self.reformulationRequestID == token.id else { return }
 
