@@ -6,22 +6,38 @@
 //
 
 import Foundation
-import GoogleGenerativeAI
 import os
+@preconcurrency import GoogleGenerativeAI
 
-private func withTimeout<T: Sendable>(
+enum TimeoutError: Error {
+    case timedOut(Double)
+}
+
+private func withTimeout<T>(
     _ seconds: Double,
-    operation: @escaping @Sendable () async throws -> T
+    operation: @Sendable @escaping () async throws -> T
 ) async throws -> T {
     try await withThrowingTaskGroup(of: T.self) { group in
         group.addTask { try await operation() }
         group.addTask {
             try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
-            throw NSError(domain: "GeminiTimeout", code: -1, userInfo: [NSLocalizedDescriptionKey: "Gemini timeout \(Int(seconds))s"])
+            throw TimeoutError.timedOut(seconds)
         }
         let result = try await group.next()!
         group.cancelAll()
         return result
+    }
+}
+
+actor GeminiClient {
+    private let model: GenerativeModel
+
+    init(apiKey: String, modelName: String) {
+        self.model = GenerativeModel(name: modelName, apiKey: apiKey)
+    }
+
+    func generate(_ prompt: String) async throws -> GenerateContentResponse {
+        try await model.generateContent(prompt)
     }
 }
 
@@ -31,26 +47,24 @@ struct EmpathyResponse {
 }
 
 final class GeminiService {
-    private let model: GenerativeModel?
+    private let client: GeminiClient?
     private let logger = Logger(subsystem: "GokigenNote", category: "GeminiService")
 
     init() {
         if let apiKey = APIKey.gemini, !apiKey.isEmpty {
             let masked = String(apiKey.prefix(4)) + "..." + String(apiKey.suffix(4))
             print("[Gemini] init: API key present, masked=\(masked)")
-            self.model = GenerativeModel(name: "gemini-2.0-flash", apiKey: apiKey)
+            self.client = GeminiClient(apiKey: apiKey, modelName: "gemini-2.0-flash")
         } else {
-            self.model = nil
-            print("[Gemini] init: API key nil or empty, model=nil")
+            self.client = nil
+            print("[Gemini] init: API key nil or empty, client=nil")
             logger.info("Gemini API key not configured. Using local fallback.")
         }
     }
 
     func generateEmpathy(for text: String) async throws -> EmpathyResponse {
-        guard let model = model else {
-            throw GeminiError.apiKeyNotAvailable
-        }
-        
+        guard let client else { throw GeminiError.apiKeyNotAvailable }
+
         logger.info("Requesting empathy generation...")
         let prompt = """
         あなたは、しんどい人に寄り添う日本語のカウンセラーです。
@@ -67,66 +81,61 @@ final class GeminiService {
            今日できそうな、ハードルの低い一歩。
            例：深呼吸を3回する／温かい飲み物を飲む など。
         """
+        print("[Gemini] API Request: generateEmpathy, text=\(text)")
 
-        print("[Gemini] START generateEmpathy")
-        let fullText: String
         do {
-            let response = try await withTimeout(15) {
-                try await model.generateContent(prompt)
+            let response = try await withTimeout(15) { [client] in
+                try await client.generate(prompt)
             }
-            print("[Gemini] OK generateEmpathy response received")
+            print("[Gemini] API Response: empathy, ok")
             print("[Gemini] TEXT: \(response.text ?? "nil")")
-            fullText = response.text ?? ""
+            logger.info("Empathy generation completed.")
+
+            let raw = response.text ?? ""
+            if raw.isEmpty {
+                print("[Gemini] WARN: response.text is empty")
+            }
+
+            // 複数の区切りパターンに対応（"2)" "2）" "2." "②" "**2)" "**2）"）
+            let splitPattern = #"(?:\*{0,2})(?:2[)）.]|②)"#
+            let parts = raw.split(
+                separator: try! Regex(splitPattern),
+                maxSplits: 1
+            )
+
+            let empathy: String
+            let nextStep: String
+
+            if parts.count > 1 {
+                empathy = String(parts[0])
+                nextStep = String(parts[1])
+            } else {
+                empathy = raw
+                nextStep = "今日はゆっくり休むだけで十分です。"
+            }
+
+            let cleanEmpathy = empathy
+                .replacingOccurrences(of: #"^[\s\*]*(?:1[)）.]|①)[\s]*"#, with: "", options: .regularExpression)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let cleanNextStep = nextStep
+                .replacingOccurrences(of: #"^[\s\*]*(?:次の一歩[：:]?)[\s]*"#, with: "", options: .regularExpression)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+
+            return EmpathyResponse(
+                empathy: cleanEmpathy.isEmpty ? raw.trimmingCharacters(in: .whitespacesAndNewlines) : cleanEmpathy,
+                nextStep: cleanNextStep.isEmpty ? "今日はゆっくり休むだけで十分です。" : cleanNextStep
+            )
         } catch {
-            print("[Gemini] ERROR generateEmpathy: \(error)")
             let ns = error as NSError
+            print("[Gemini] ERROR generateEmpathy: \(error)")
             print("[Gemini] NSError domain=\(ns.domain) code=\(ns.code) userInfo=\(ns.userInfo)")
             throw error
         }
-        print("[Gemini] END generateEmpathy")
-
-        logger.info("Empathy generation completed.")
-
-        // 複数の区切りパターンに対応（"2)" "2）" "2." "②" "**2)" "**2）"）
-        let splitPattern = #"(?:\*{0,2})(?:2[)）.]|②)"#
-        let parts = fullText.split(
-            separator: try! Regex(splitPattern),
-            maxSplits: 1
-        )
-
-        let empathy: String
-        let nextStep: String
-
-        if parts.count > 1 {
-            empathy = String(parts[0])
-            nextStep = String(parts[1])
-        } else {
-            // 区切りが見つからない場合: 全体を共感メッセージとしフォールバック
-            empathy = fullText
-            nextStep = "今日はゆっくり休むだけで十分です。"
-        }
-
-        // "1)" 等のプレフィックスも除去
-        let cleanEmpathy = empathy
-            .replacingOccurrences(of: #"^[\s\*]*(?:1[)）.]|①)[\s]*"#, with: "", options: .regularExpression)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        // "次の一歩：" 等のラベルを除去
-        let cleanNextStep = nextStep
-            .replacingOccurrences(of: #"^[\s\*]*(?:次の一歩[：:]?)[\s]*"#, with: "", options: .regularExpression)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-
-        return EmpathyResponse(
-            empathy: cleanEmpathy.isEmpty ? fullText.trimmingCharacters(in: .whitespacesAndNewlines) : cleanEmpathy,
-            nextStep: cleanNextStep.isEmpty ? "今日はゆっくり休むだけで十分です。" : cleanNextStep
-        )
     }
-    
-    // 言語化が苦手な人のための文章整形機能（目的・相手・トーン指定あり）
+
     func reformulateText(for text: String, context: ReformulationContext = .default) async throws -> String {
-        guard let model = model else {
-            throw GeminiError.apiKeyNotAvailable
-        }
-        
+        guard let client else { throw GeminiError.apiKeyNotAvailable }
+
         logger.info("Requesting text reformulation...")
         let prompt = """
         あなたは、言語化が苦手な人をサポートする優しい日本語アシスタントです。
@@ -150,49 +159,48 @@ final class GeminiService {
         【重要】説明や前置きは不要です。整形した文章だけを返してください。
         【重要】「整形した文章：」などのラベルも不要です。文章のみを返してください。
         """
+        print("[Gemini] API Request: reformulateText, text=\(text), purpose=\(context.purpose.rawValue), audience=\(context.audience.rawValue), tone=\(context.tone.rawValue)")
 
-        print("[Gemini] START reformulateText")
-        let rawText: String
         do {
-            let response = try await withTimeout(15) {
-                try await model.generateContent(prompt)
+            let response = try await withTimeout(15) { [client] in
+                try await client.generate(prompt)
             }
-            print("[Gemini] OK reformulateText response received")
+            print("[Gemini] API Response: reformulateText, ok")
             print("[Gemini] TEXT: \(response.text ?? "nil")")
-            rawText = response.text ?? text
+            logger.info("Text reformulation completed.")
+
+            var reformulatedText = response.text ?? text
+            if reformulatedText.isEmpty {
+                print("[Gemini] WARN: response.text is empty")
+            }
+
+            let unwantedPrefixes = [
+                "整形した文章：",
+                "整形した文章:",
+                "言い換え：",
+                "言い換え:",
+                "回答：",
+                "回答:",
+                "「",
+                "」"
+            ]
+
+            for prefix in unwantedPrefixes {
+                if reformulatedText.hasPrefix(prefix) {
+                    reformulatedText = String(reformulatedText.dropFirst(prefix.count))
+                }
+                if reformulatedText.hasSuffix(prefix) {
+                    reformulatedText = String(reformulatedText.dropLast(prefix.count))
+                }
+            }
+
+            return reformulatedText.trimmingCharacters(in: .whitespacesAndNewlines)
         } catch {
-            print("[Gemini] ERROR reformulateText: \(error)")
             let ns = error as NSError
+            print("[Gemini] ERROR reformulateText: \(error)")
             print("[Gemini] NSError domain=\(ns.domain) code=\(ns.code) userInfo=\(ns.userInfo)")
             throw error
         }
-        print("[Gemini] END reformulateText")
-
-        logger.info("Text reformulation completed.")
-        var reformulatedText = rawText
-        
-        // 余計な接頭辞を削除
-        let unwantedPrefixes = [
-            "整形した文章：",
-            "整形した文章:",
-            "言い換え：",
-            "言い換え:",
-            "回答：",
-            "回答:",
-            "「",
-            "」"
-        ]
-        
-        for prefix in unwantedPrefixes {
-            if reformulatedText.hasPrefix(prefix) {
-                reformulatedText = String(reformulatedText.dropFirst(prefix.count))
-            }
-            if reformulatedText.hasSuffix(prefix) {
-                reformulatedText = String(reformulatedText.dropLast(prefix.count))
-            }
-        }
-        
-        return reformulatedText.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
 
