@@ -408,8 +408,9 @@ struct TodayView: View {
             }
         case .denied, .restricted:
             showSpeechPermissionAlert = true
-        case .notDetermined, .idle, .authorized, .processing:
-            if speechInput.state == .processing { return }
+        case .processing, .transcribing:
+            return
+        case .notDetermined, .idle, .authorized, .completed:
             Task {
                 await speechInput.startRecording()
             }
