@@ -38,13 +38,13 @@ struct EntryDetailView: View {
                                     Label("コピー", systemImage: "doc.on.doc")
                                         .frame(maxWidth: .infinity)
                                 }
-                                .buttonStyle(.bordered)
+                                .buttonStyle(BorderedButtonStyle())
                                 
                                 Button(action: { shareText(reformulated) }) {
                                     Label("共有", systemImage: "square.and.arrow.up")
                                         .frame(maxWidth: .infinity)
                                 }
-                                .buttonStyle(.bordered)
+                                .buttonStyle(BorderedButtonStyle())
                             }
                         }
                     } header: {

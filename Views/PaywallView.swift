@@ -183,7 +183,7 @@ private struct PaywallProductButtons: View {
                     }
                     .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(product.id == featuredProductID ? .borderedProminent : .bordered)
+                .buttonStyle(product.id == featuredProductID ? BorderedProminentButtonStyle() : BorderedButtonStyle())
             }
 
             if orderedProducts.isEmpty {

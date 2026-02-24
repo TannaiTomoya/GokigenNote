@@ -90,7 +90,7 @@ struct ReverseMemoryGame: View {
             Button("スタート") {
                 startRound()
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(BorderedProminentButtonStyle())
             .tint(.green)
             .font(.title3)
         }
@@ -139,7 +139,7 @@ struct ReverseMemoryGame: View {
             Button("回答する") {
                 checkAnswer()
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(BorderedProminentButtonStyle())
             .tint(.green)
             .font(.headline)
             .disabled(userInput.isEmpty)
@@ -173,7 +173,7 @@ struct ReverseMemoryGame: View {
                 Button("次の問題へ") {
                     startRound()
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(BorderedProminentButtonStyle())
                 .tint(.green)
             }
         }
@@ -215,7 +215,7 @@ struct ReverseMemoryGame: View {
                 )
                 dismiss()
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(BorderedProminentButtonStyle())
             .tint(.green)
             .font(.headline)
         }

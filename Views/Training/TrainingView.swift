@@ -251,7 +251,7 @@ struct GameCard: View {
             .padding()
             .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PlainButtonStyle())
         .accessibilityLabel("\(title): \(description)")
         .accessibilityHint("タップしてゲームを開始")
     }

@@ -111,7 +111,7 @@ struct TodayView: View {
                         .font(.subheadline)
                         .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(BorderedProminentButtonStyle())
                 .accessibilityHint("別の問いを表示します")
             }
         }
@@ -151,7 +151,7 @@ struct TodayView: View {
                     .background(speechInput.state == .recording ? Color.red.opacity(0.15) : Color.accentColor.opacity(0.15), in: RoundedRectangle(cornerRadius: 16))
                     .foregroundStyle(speechInput.state == .recording ? .red : .accentColor)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(PlainButtonStyle())
                 .disabled(speechInput.state == .processing)
                 .accessibilityLabel(speechInput.state == .recording ? "音声入力を停止" : "話す")
                 if speechInput.state == .recording && !speechInput.recognizedText.isEmpty {
@@ -207,7 +207,7 @@ struct TodayView: View {
                         Label("送る（LINE想定）", systemImage: "paperplane")
                             .frame(maxWidth: .infinity)
                     }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(BorderedProminentButtonStyle())
 
                     Button {
                         vm.clearReformulatedResult()
@@ -215,7 +215,7 @@ struct TodayView: View {
                         Label("もう一度調整", systemImage: "arrow.uturn.backward")
                             .frame(maxWidth: .infinity)
                     }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(BorderedButtonStyle())
                 }
 
                 HStack(spacing: 8) {
@@ -223,7 +223,7 @@ struct TodayView: View {
                         Label("再生", systemImage: "speaker.wave.2")
                             .font(.caption)
                     }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(BorderedButtonStyle())
                     .disabled(vm.reformulatedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
 
                     switch vm.autoSaveState {
@@ -232,7 +232,7 @@ struct TodayView: View {
                             Label("記録する", systemImage: "bookmark")
                                 .font(.caption)
                         }
-                        .buttonStyle(.bordered)
+                        .buttonStyle(BorderedButtonStyle())
                         .disabled(
                             vm.draftText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                             || vm.isAutoSaving
@@ -246,7 +246,7 @@ struct TodayView: View {
                             Label("再送", systemImage: "arrow.clockwise")
                                 .font(.caption)
                         }
-                        .buttonStyle(.bordered)
+                        .buttonStyle(BorderedButtonStyle())
                     }
                 }
 
@@ -263,7 +263,7 @@ struct TodayView: View {
                                 .foregroundStyle(.secondary)
                         }
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(PlainButtonStyle())
                 }
             }
         }
@@ -362,7 +362,7 @@ struct TodayView: View {
                 Label("例文を挿入", systemImage: "text.append")
                     .frame(maxWidth: .infinity)
             }
-            .buttonStyle(.bordered)
+            .buttonStyle(BorderedButtonStyle())
             .accessibilityHint("いまの気持ちに近い例文を差し込みます")
 
             Button(action: { vm.reformulateText() }) {
@@ -376,7 +376,7 @@ struct TodayView: View {
                 }
                 .frame(maxWidth: .infinity)
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(BorderedProminentButtonStyle())
             .disabled(
                 vm.isLoadingReformulation
                     || vm.draftText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty

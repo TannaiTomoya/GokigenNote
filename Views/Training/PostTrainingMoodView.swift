@@ -113,7 +113,7 @@ struct PostTrainingMoodView: View {
                 .fontWeight(.semibold)
                 .frame(maxWidth: .infinity)
         }
-        .buttonStyle(.borderedProminent)
+        .buttonStyle(BorderedProminentButtonStyle())
     }
 
     private func saveEntry() {

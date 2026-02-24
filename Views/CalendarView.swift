@@ -137,7 +137,7 @@ struct CalendarView: View {
                     .padding()
                     .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(PlainButtonStyle())
             }
         }
         .padding()

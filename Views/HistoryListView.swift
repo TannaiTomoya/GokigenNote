@@ -26,7 +26,7 @@ struct HistoryListView: View {
                     } label: {
                         HistoryRow(entry: entry)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(PlainButtonStyle())
                 }
                 if vm.canLoadMore {
                     ProgressView()

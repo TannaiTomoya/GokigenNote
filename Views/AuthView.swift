@@ -133,7 +133,7 @@ struct AuthView: View {
                 }
                 .frame(maxWidth: .infinity)
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(BorderedProminentButtonStyle())
             .disabled(!isFormValid)
 
             Button(action: { Task { await authVM.signInWithGoogle() } }) {
@@ -144,7 +144,7 @@ struct AuthView: View {
                 }
                 .frame(maxWidth: .infinity)
             }
-            .buttonStyle(.bordered)
+            .buttonStyle(BorderedButtonStyle())
 
             if !isSignUp {
                 Button("パスワードを忘れた場合") {
@@ -255,7 +255,7 @@ struct PasswordResetView: View {
                     }
                     .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(BorderedProminentButtonStyle())
                 .disabled(
                     email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                     || !email.contains("@")

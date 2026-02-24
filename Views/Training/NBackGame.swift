@@ -93,7 +93,7 @@ struct NBackGame: View {
             Button("スタート") {
                 startGame()
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(BorderedProminentButtonStyle())
             .tint(.purple)
             .font(.title3)
         }
@@ -166,7 +166,7 @@ struct NBackGame: View {
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 12)
                     }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(BorderedProminentButtonStyle())
                     .tint(.purple)
 
                     Button(action: { judge(isSame: false) }) {
@@ -179,7 +179,7 @@ struct NBackGame: View {
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 12)
                     }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(BorderedButtonStyle())
                     .tint(.gray)
                 }
             } else {
@@ -190,7 +190,7 @@ struct NBackGame: View {
                 Button("次へ") {
                     advanceToNext()
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(BorderedProminentButtonStyle())
                 .tint(.purple)
             }
         }
@@ -236,7 +236,7 @@ struct NBackGame: View {
                 )
                 dismiss()
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(BorderedProminentButtonStyle())
             .tint(.purple)
             .font(.headline)
         }

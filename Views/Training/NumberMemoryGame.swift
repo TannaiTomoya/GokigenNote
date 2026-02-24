@@ -86,7 +86,7 @@ struct NumberMemoryGame: View {
             Button("スタート") {
                 startRound()
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(BorderedProminentButtonStyle())
             .font(.title3)
         }
     }
@@ -125,7 +125,7 @@ struct NumberMemoryGame: View {
             Button("回答する") {
                 checkAnswer()
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(BorderedProminentButtonStyle())
             .font(.headline)
             .disabled(userInput.isEmpty)
         }
@@ -155,7 +155,7 @@ struct NumberMemoryGame: View {
                 Button("次の問題へ") {
                     startRound()
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(BorderedProminentButtonStyle())
             }
         }
     }
@@ -196,7 +196,7 @@ struct NumberMemoryGame: View {
                 )
                 dismiss()
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(BorderedProminentButtonStyle())
             .font(.headline)
         }
     }
