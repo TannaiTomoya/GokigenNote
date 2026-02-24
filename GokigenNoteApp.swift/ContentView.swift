@@ -225,17 +225,7 @@ struct TodayView: View {
                     .disabled(vm.reformulatedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
 
                     switch vm.autoSaveState {
-                    case .saving:
-                        Text("保存中…")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    case .failed(_):
-                        Button(action: vm.retryAutoSave) {
-                            Label("再送", systemImage: "arrow.clockwise")
-                                .font(.caption)
-                        }
-                        .buttonStyle(.bordered)
-                    default:
+                    case .idle, .saved:
                         Button(action: vm.saveCurrentEntry) {
                             Label("記録する", systemImage: "bookmark")
                                 .font(.caption)
@@ -245,6 +235,16 @@ struct TodayView: View {
                             vm.draftText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                             || vm.isAutoSaving
                         )
+                    case .saving:
+                        Text("保存中…")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    case .failed:
+                        Button(action: vm.retryAutoSave) {
+                            Label("再送", systemImage: "arrow.clockwise")
+                                .font(.caption)
+                        }
+                        .buttonStyle(.bordered)
                     }
                 }
 
