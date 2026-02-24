@@ -342,7 +342,8 @@ final class PremiumManager: ObservableObject {
             log.debug("refreshEntitlements start mode=\(String(describing: mode), privacy: .public) cached=\(cached.cacheValue, privacy: .public) current=\(self.plan.cacheValue, privacy: .public) products=\(self.availableProducts.count, privacy: .public) loaded=\(self.entitlementsLoaded, privacy: .public)")
 
             var newOwned: Set<String> = []
-            var jwsForServer: [String] = []
+            // P1A: server sync payload (disabled until we decide the signed data format; StoreKit2 Transaction has no jwsRepresentation)
+            // var signedPayloads: [String] = []
             var verifyFailedCount = 0
 
             for await result in StoreKit.Transaction.currentEntitlements {
@@ -351,7 +352,7 @@ final class PremiumManager: ObservableObject {
                     if t.revocationDate != nil { continue }
                     if let exp = t.expirationDate, exp <= now { continue }
                     newOwned.insert(t.productID)
-                    jwsForServer.append(t.jwsRepresentation)
+                    // signedPayloads.append(...) // TODO: decide payload format (signedData etc.)
                 } catch {
                     verifyFailedCount += 1
                     log.error("verify failed in currentEntitlements: \(error.localizedDescription, privacy: .public)")
@@ -359,8 +360,8 @@ final class PremiumManager: ObservableObject {
                 }
             }
 
-            // P1A: サーバを唯一の正にする。購入/復元/起動後は syncEntitlements で Firestore に反映
-            await syncEntitlementsToServer(transactions: jwsForServer)
+            // P1A: サーバ同期は P0 では無効化。課金は StoreKit2 currentEntitlements/updates で担保。P1B で復活予定。
+            // await syncEntitlementsToServer(transactions: signedPayloads)
 
             let entitlementsLooksHealthy =
                 verifyFailedCount == 0 &&
