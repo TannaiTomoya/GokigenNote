@@ -8,22 +8,24 @@
 import SwiftUI
 import StoreKit
 
+private enum LegalSheet: Identifiable {
+    case terms, privacy
+    var id: Int { switch self { case .terms: return 1; case .privacy: return 2 } }
+}
+
 struct PaywallView: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject private var pm = PremiumManager.shared
-    @State private var showTerms = false
-    @State private var showPrivacy = false
+    @State private var legalSheet: LegalSheet?
 
     var body: some View {
-        let products = orderedProducts
-        let featured = featuredProductID
-        return NavigationStack {
+        NavigationStack {
             VStack(spacing: 16) {
                 header
 
                 featureList
 
-                PaywallProductButtons(pm: pm, orderedProducts: products, featuredProductID: featured)
+                PaywallProductButtons(pm: pm, orderedProducts: orderedProducts, featuredProductID: featuredProductID)
 
                 footer
             }
@@ -39,12 +41,7 @@ struct PaywallView: View {
                 }
             }
             .overlay {
-                if pm.isLoading {
-                    ZStack {
-                        Color.black.opacity(0.2).ignoresSafeArea()
-                        ProgressView()
-                    }
-                }
+                LoadingOverlay(isLoading: pm.isLoading)
             }
             .onAppear {
                 Task {
@@ -54,11 +51,11 @@ struct PaywallView: View {
                     await pm.refreshEntitlements(mode: .startupCautious)
                 }
             }
-            .sheet(isPresented: $showTerms) {
-                TermsOfServiceView()
-            }
-            .sheet(isPresented: $showPrivacy) {
-                PrivacyPolicyView()
+            .sheet(item: $legalSheet) { sheet in
+                switch sheet {
+                case .terms: TermsOfServiceView()
+                case .privacy: PrivacyPolicyView()
+                }
             }
         }
     }
@@ -109,9 +106,9 @@ struct PaywallView: View {
     private var footer: some View {
         VStack(spacing: 8) {
             HStack(spacing: 16) {
-                Button("利用規約") { showTerms = true }
+                Button("利用規約") { legalSheet = .terms }
                     .font(.caption)
-                Button("プライバシーポリシー") { showPrivacy = true }
+                Button("プライバシーポリシー") { legalSheet = .privacy }
                     .font(.caption)
             }
             Text("自動更新：サブスクは自動更新され、更新の24時間前に課金されます。解約は設定＞サブスクリプションからいつでも可能です。")
@@ -143,17 +140,38 @@ struct PaywallView: View {
     }
 }
 
+// MARK: - overlay 型合成軽量化
+private struct LoadingOverlay: View {
+    let isLoading: Bool
+    var body: some View {
+        if isLoading {
+            ZStack {
+                Color.black.opacity(0.2).ignoresSafeArea()
+                ProgressView()
+            }
+        }
+    }
+}
+
 // MARK: - 型推論軽量化のため別 View に分割
 private struct PaywallProductButtons: View {
     @ObservedObject var pm: PremiumManager
     let orderedProducts: [Product]
     let featuredProductID: String?
 
+    private func buy(_ product: Product) {
+        Task { await pm.purchase(product) }
+    }
+
+    private func doRestore() {
+        Task { await pm.restore() }
+    }
+
     var body: some View {
         VStack(spacing: 12) {
             ForEach(orderedProducts, id: \.id) { product in
                 Button {
-                    Task { await pm.purchase(product) }
+                    buy(product)
                 } label: {
                     HStack {
                         VStack(alignment: .leading, spacing: 2) {
@@ -181,7 +199,7 @@ private struct PaywallProductButtons: View {
                 .foregroundStyle(.secondary)
 
             Button("購入を復元") {
-                Task { await pm.restore() }
+                doRestore()
             }
             .font(.subheadline)
             .padding(.top, 4)
