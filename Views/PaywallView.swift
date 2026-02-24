@@ -15,13 +15,15 @@ struct PaywallView: View {
     @State private var showPrivacy = false
 
     var body: some View {
-        NavigationStack {
+        let products = orderedProducts
+        let featured = featuredProductID
+        return NavigationStack {
             VStack(spacing: 16) {
                 header
 
                 featureList
 
-                productButtons
+                PaywallProductButtons(pm: pm, orderedProducts: products, featuredProductID: featured)
 
                 footer
             }
@@ -44,11 +46,13 @@ struct PaywallView: View {
                     }
                 }
             }
-            .task {
-                if pm.availableProducts.isEmpty {
-                    await pm.loadProducts()
+            .onAppear {
+                Task {
+                    if pm.availableProducts.isEmpty {
+                        await pm.loadProducts()
+                    }
+                    await pm.refreshEntitlements(mode: .startupCautious)
                 }
-                await pm.refreshEntitlements(mode: .startupCautious)
             }
             .sheet(isPresented: $showTerms) {
                 TermsOfServiceView()
@@ -102,17 +106,59 @@ struct PaywallView: View {
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16))
     }
 
-    private var productButtons: some View {
-        let products = orderedProducts
-        return VStack(spacing: 12) {
-            ForEach(products, id: \.id) { product in
+    private var footer: some View {
+        VStack(spacing: 8) {
+            HStack(spacing: 16) {
+                Button("利用規約") { showTerms = true }
+                    .font(.caption)
+                Button("プライバシーポリシー") { showPrivacy = true }
+                    .font(.caption)
+            }
+            Text("自動更新：サブスクは自動更新され、更新の24時間前に課金されます。解約は設定＞サブスクリプションからいつでも可能です。")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+        }
+        .padding(.top, 8)
+    }
+
+    private func planText(_ plan: Plan) -> String {
+        plan.displayName
+    }
+
+    /// 表示順：ProductID.sortKey で並べ替え（存在するものだけ、追加時も漏れない）
+    private var orderedProducts: [Product] {
+        pm.availableProducts.sorted {
+            ProductID.sortKey(for: $0.id) < ProductID.sortKey(for: $1.id)
+        }
+    }
+
+    /// 推し商品（存在する中で優先：年額 → 月額 → 買い切り）。該当なしなら nil
+    private var featuredProductID: String? {
+        let ids = Set(pm.availableProducts.map(\.id))
+        if ids.contains(ProductID.premiumYearly) { return ProductID.premiumYearly }
+        if ids.contains(ProductID.premiumMonthly) { return ProductID.premiumMonthly }
+        if ids.contains(ProductID.lifetime) { return ProductID.lifetime }
+        return nil
+    }
+}
+
+// MARK: - 型推論軽量化のため別 View に分割
+private struct PaywallProductButtons: View {
+    @ObservedObject var pm: PremiumManager
+    let orderedProducts: [Product]
+    let featuredProductID: String?
+
+    var body: some View {
+        VStack(spacing: 12) {
+            ForEach(orderedProducts, id: \.id) { product in
                 Button {
                     Task { await pm.purchase(product) }
                 } label: {
                     HStack {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(ProductID.displayName(for: product.id)).fontWeight(.semibold)
-                            Text(priceText(product)).font(.caption).foregroundStyle(.secondary)
+                            Text(product.displayPrice).font(.caption).foregroundStyle(.secondary)
                         }
                         Spacer()
                         Image(systemName: "chevron.right").font(.caption)
@@ -122,7 +168,7 @@ struct PaywallView: View {
                 .buttonStyle(product.id == featuredProductID ? .borderedProminent : .bordered)
             }
 
-            if products.isEmpty {
+            if orderedProducts.isEmpty {
                 Text("商品を取得できませんでした。通信状況やストア設定、サンドボックスでのサインインを確認してください。")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -147,45 +193,5 @@ struct PaywallView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
-    }
-
-    private var footer: some View {
-        VStack(spacing: 8) {
-            HStack(spacing: 16) {
-                Button("利用規約") { showTerms = true }
-                    .font(.caption)
-                Button("プライバシーポリシー") { showPrivacy = true }
-                    .font(.caption)
-            }
-            Text("自動更新：サブスクは自動更新され、更新の24時間前に課金されます。解約は設定＞サブスクリプションからいつでも可能です。")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-        }
-        .padding(.top, 8)
-    }
-
-    private func planText(_ plan: Plan) -> String {
-        plan.displayName
-    }
-
-    private func priceText(_ product: Product) -> String {
-        product.displayPrice
-    }
-
-    /// 表示順：ProductID.sortKey で並べ替え（存在するものだけ、追加時も漏れない）
-    private var orderedProducts: [Product] {
-        pm.availableProducts.sorted {
-            ProductID.sortKey(for: $0.id) < ProductID.sortKey(for: $1.id)
-        }
-    }
-
-    /// 推し商品（存在する中で優先：年額 → 月額 → 買い切り）。該当なしなら nil
-    private var featuredProductID: String? {
-        let ids = Set(pm.availableProducts.map(\.id))
-        if ids.contains(ProductID.premiumYearly) { return ProductID.premiumYearly }
-        if ids.contains(ProductID.premiumMonthly) { return ProductID.premiumMonthly }
-        if ids.contains(ProductID.lifetime) { return ProductID.lifetime }
-        return nil
     }
 }
