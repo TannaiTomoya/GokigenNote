@@ -345,7 +345,7 @@ final class PremiumManager: ObservableObject {
             var jwsForServer: [String] = []
             var verifyFailedCount = 0
 
-            for await result in Transaction.currentEntitlements {
+            for await result in StoreKit.Transaction.currentEntitlements {
                 do {
                     let t = try Self.verifyTransaction(result)
                     if t.revocationDate != nil { continue }
@@ -443,7 +443,7 @@ final class PremiumManager: ObservableObject {
 
     /// Transaction更新を監視（復元・端末間同期・ファミリー共有・返金で必須）
     private func observeTransactionUpdates() async {
-        for await update in Transaction.updates {
+        for await update in StoreKit.Transaction.updates {
             do {
                 let t = try Self.verifyTransaction(update)
                 await t.finish()

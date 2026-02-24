@@ -86,6 +86,7 @@ final class SpeechInputService: ObservableObject {
         guard let recognitionRequest else { return }
         recognitionRequest.shouldReportPartialResults = true
 
+        #if os(iOS)
         do {
             let session = AVAudioSession.sharedInstance()
             try session.setCategory(
@@ -99,6 +100,7 @@ final class SpeechInputService: ObservableObject {
             reset()
             return
         }
+        #endif
 
         let inputNode = audioEngine.inputNode
         let format = inputNode.outputFormat(forBus: 0)

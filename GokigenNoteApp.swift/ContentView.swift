@@ -5,7 +5,9 @@
 //  Created by 丹内智弥 on 2025/11/19.
 //
 import SwiftUI
+#if os(iOS)
 import UIKit
+#endif
 
 // MARK: - Today View (今日の問い画面)
 
