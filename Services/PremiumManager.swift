@@ -258,7 +258,7 @@ final class PremiumManager: ObservableObject {
             let result = try await product.purchase()
             switch result {
             case .success(let verification):
-                let transaction = try Self.verifyTransaction(verification)
+                let transaction: StoreKit.Transaction = try Self.verifyTransaction(verification)
                 await transaction.finish()
                 do {
                     try await AppStore.sync()
@@ -347,7 +347,7 @@ final class PremiumManager: ObservableObject {
 
             for await result in StoreKit.Transaction.currentEntitlements {
                 do {
-                    let t = try Self.verifyTransaction(result)
+                    let t: StoreKit.Transaction = try Self.verifyTransaction(result)
                     if t.revocationDate != nil { continue }
                     if let exp = t.expirationDate, exp <= now { continue }
                     newOwned.insert(t.productID)
@@ -445,7 +445,7 @@ final class PremiumManager: ObservableObject {
     private func observeTransactionUpdates() async {
         for await update in StoreKit.Transaction.updates {
             do {
-                let t = try Self.verifyTransaction(update)
+                let t: StoreKit.Transaction = try Self.verifyTransaction(update)
                 await t.finish()
                 await refreshEntitlements(mode: .force)
             } catch {
