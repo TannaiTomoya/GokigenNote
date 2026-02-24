@@ -46,6 +46,12 @@ struct TodayView: View {
                             .foregroundStyle(.red)
                             .multilineTextAlignment(.center)
                     }
+                    if let error = vm.lastSaveError {
+                        Text("保存に失敗: \(error)")
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                            .multilineTextAlignment(.center)
+                    }
                     TrendCard(snapshot: vm.trendSnapshot)
                 }
                 .padding()
@@ -216,12 +222,30 @@ struct TodayView: View {
                             .font(.caption)
                     }
                     .buttonStyle(.bordered)
-                    Button(action: vm.saveCurrentEntry) {
-                        Label("記録する", systemImage: "bookmark")
+                    .disabled(vm.reformulatedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                    switch vm.autoSaveState {
+                    case .saving:
+                        Text("保存中…")
                             .font(.caption)
+                            .foregroundStyle(.secondary)
+                    case .failed(_):
+                        Button(action: vm.retryAutoSave) {
+                            Label("再送", systemImage: "arrow.clockwise")
+                                .font(.caption)
+                        }
+                        .buttonStyle(.bordered)
+                    default:
+                        Button(action: vm.saveCurrentEntry) {
+                            Label("記録する", systemImage: "bookmark")
+                                .font(.caption)
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(
+                            vm.draftText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                            || vm.isAutoSaving
+                        )
                     }
-                    .buttonStyle(.bordered)
-                    .disabled(vm.draftText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
 
                 if !premium.effectivePlan.isPremium {

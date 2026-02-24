@@ -1,13 +1,98 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    match /users/{uid} {
-      allow read: if request.auth != null && request.auth.uid == uid;
-      allow create: if request.auth != null && request.auth.uid == uid && request.resource.data.version == 1;
-      allow update, delete: if request.auth != null && request.auth.uid == uid;
 
+    // =========================
+    // users/{uid}
+    // =========================
+    match /users/{uid} {
+
+      function isOwner() {
+        return request.auth != null && request.auth.uid == uid;
+      }
+
+      // users/{uid} ドキュメント本体
+      allow read, create: if isOwner();
+      allow update: if isOwner()
+        && !( "entitlements" in request.resource.data );
+      allow delete: if false;
+
+      // 配下サブコレクションの read（entries / usage / entitlements 等）
       match /{document=**} {
-        allow read, write: if request.auth != null && request.auth.uid == uid;
+        allow read: if isOwner();
+      }
+
+      // =========================
+      // entries（コア）
+      // =========================
+      match /entries/{entryId} {
+
+        function isFinalized() {
+          return resource.data.isFinalized == true;
+        }
+
+        function isOwner() {
+          return request.auth != null && request.auth.uid == uid;
+        }
+
+        // フィールドサイズ制限（P1A 審査・UX 安全）
+        function withinSizeLimits() {
+          return (!("rawText" in request.resource.data) || request.resource.data.rawText.size() <= 5000)
+            && (!("rewriteText" in request.resource.data) || request.resource.data.rewriteText.size() <= 8000);
+        }
+
+        allow read: if isOwner();
+
+        // 新規作成（upsert初回含む）
+        allow create: if isOwner() && withinSizeLimits();
+
+        // 更新ルール
+        allow update: if isOwner() && withinSizeLimits() && (
+          // 未確定なら自由に更新OK（DraftSessionのupsert）
+          (!isFinalized())
+
+          ||
+
+          // false → true の finalize だけ許可
+          (
+            resource.data.isFinalized == false &&
+            request.resource.data.isFinalized == true
+          )
+        );
+
+        // 削除は禁止（データ保全）
+        allow delete: if false;
+      }
+
+      // =========================
+      // usageDaily / usageMonthly（P1A: Functions 専用書き込み）
+      // =========================
+      match /usageDaily/{docId} {
+        allow read: if isOwner();
+        allow write: if false;
+      }
+      match /usageMonthly/{docId} {
+        allow read: if isOwner();
+        allow write: if false;
+      }
+
+      // =========================
+      // entitlements（課金状態）
+      // =========================
+      match /entitlements/{docId} {
+        allow read: if isOwner();
+
+        // クライアント書き込み禁止（サーバー専用）
+        allow write: if false;
+      }
+
+      // =========================
+      // finalizeRequests（将来P1用）
+      // =========================
+      match /finalizeRequests/{requestId} {
+        allow create: if isOwner();
+        allow read: if isOwner();
+        allow update, delete: if false;
       }
     }
   }

@@ -61,10 +61,14 @@ struct PaywallView: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("言い換え・共感生成を無制限に")
+            Text("プレミアムでできること")
                 .font(.title2.weight(.bold))
 
-            Text("無料枠は「言い換え / 共感生成」で同じ回数枠を消費します。")
+            Text("言い換え・例文・共感の生成が無制限（サブスク）／買い切りは月200回まで。")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+
+            Text("無料プラン：1日10回まで")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
 
@@ -88,8 +92,8 @@ struct PaywallView: View {
 
     private var featureList: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("・言い換え無制限")
-            Text("・共感生成無制限")
+            Text("・言い換え無制限（サブスク）／月200回（買い切り）")
+            Text("・共感生成無制限（サブスク）／月200回（買い切り）")
             Text("・思考整理を加速")
         }
         .font(.subheadline)
@@ -125,6 +129,10 @@ struct PaywallView: View {
                     .padding(.vertical, 8)
             }
 
+            Text("価格は各プランに表示のとおり（月額・年額・買い切り）")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+
             Button("購入を復元") {
                 Task { await pm.restore() }
             }
@@ -148,7 +156,7 @@ struct PaywallView: View {
                 Button("プライバシーポリシー") { showPrivacy = true }
                     .font(.caption)
             }
-            Text("※購入はいつでもキャンセル/管理できます（App Storeのサブスクリプション）。")
+            Text("自動更新：サブスクは自動更新され、更新の24時間前に課金されます。解約は設定＞サブスクリプションからいつでも可能です。")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)

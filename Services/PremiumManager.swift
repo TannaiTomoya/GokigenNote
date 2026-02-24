@@ -11,6 +11,7 @@ import StoreKit
 import Combine
 import SwiftUI
 import OSLog
+import FirebaseFunctions
 
 enum SubscriptionType: Equatable {
     case monthly
@@ -341,6 +342,7 @@ final class PremiumManager: ObservableObject {
             log.debug("refreshEntitlements start mode=\(String(describing: mode), privacy: .public) cached=\(cached.cacheValue, privacy: .public) current=\(self.plan.cacheValue, privacy: .public) products=\(self.availableProducts.count, privacy: .public) loaded=\(self.entitlementsLoaded, privacy: .public)")
 
             var newOwned: Set<String> = []
+            var jwsForServer: [String] = []
             var verifyFailedCount = 0
 
             for await result in Transaction.currentEntitlements {
@@ -349,12 +351,16 @@ final class PremiumManager: ObservableObject {
                     if t.revocationDate != nil { continue }
                     if let exp = t.expirationDate, exp <= now { continue }
                     newOwned.insert(t.productID)
+                    jwsForServer.append(t.jwsRepresentation)
                 } catch {
                     verifyFailedCount += 1
                     log.error("verify failed in currentEntitlements: \(error.localizedDescription, privacy: .public)")
                     continue
                 }
             }
+
+            // P1A: サーバを唯一の正にする。購入/復元/起動後は syncEntitlements で Firestore に反映
+            await syncEntitlementsToServer(transactions: jwsForServer)
 
             let entitlementsLooksHealthy =
                 verifyFailedCount == 0 &&
@@ -396,6 +402,23 @@ final class PremiumManager: ObservableObject {
         switch result {
         case .verified(let safe): return safe
         case .unverified(_, let error): throw error
+        }
+    }
+
+    /// P1A: Functions syncEntitlements に JWS を送り、サーバで署名検証・entitlements/current に保存。
+    /// 未ログイン時は unauthenticated で失敗するだけ（ローカル plan は refreshEntitlements で更新済み）。
+    private func syncEntitlementsToServer(transactions: [String]) async {
+        guard !transactions.isEmpty else { return }
+        let functions = Functions.functions(region: "asia-northeast1")
+        let callable = functions.httpsCallable("syncEntitlements")
+        do {
+            let result = try await callable.call(["transactions": transactions])
+            if let data = result.data as? [String: Any], (data["ok"] as? Bool) == true {
+                log.info("syncEntitlements ok plan=\(data["plan"] as? String ?? "?", privacy: .public)")
+            }
+        } catch {
+            // 未ログインやネット障害時は無視（ローカル plan はそのまま）
+            log.debug("syncEntitlements failed: \(error.localizedDescription, privacy: .public)")
         }
     }
 

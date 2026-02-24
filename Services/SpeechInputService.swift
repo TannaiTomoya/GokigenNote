@@ -19,6 +19,8 @@ enum SpeechInputState: Equatable {
     case notDetermined
     case recording
     case processing
+    case transcribing  // 停止後・テキスト確定中（UX用）
+    case completed     // 正常完了（UX用）
     case error(String)
 }
 
@@ -64,6 +66,7 @@ final class SpeechInputService: ObservableObject {
 
     /// 録音開始。認識結果は `recognizedText` に逐次入る。完了後に `stopRecording()` で確定。
     func startRecording() async {
+        guard state != .recording else { return }
         guard speechRecognizer != nil, speechRecognizer!.isAvailable else {
             state = .error("音声認識を利用できません")
             return
@@ -71,7 +74,7 @@ final class SpeechInputService: ObservableObject {
         if state == .denied || state == .restricted {
             return
         }
-        if state != .authorized && state != .recording && state != .processing {
+        if state != .authorized && state != .recording && state != .processing && state != .transcribing && state != .completed {
             await requestAuthorization()
             if state != .authorized { return }
         }
@@ -90,7 +93,7 @@ final class SpeechInputService: ObservableObject {
                 mode: .measurement,
                 options: [.defaultToSpeaker, .allowBluetoothHFP]
             )
-            try session.setActive(true)
+            try session.setActive(true, options: .notifyOthersOnDeactivation)
         } catch {
             state = .error("マイクを利用できません")
             reset()
@@ -115,6 +118,8 @@ final class SpeechInputService: ObservableObject {
         state = .recording
         recognizedText = ""
 
+        recognitionTask?.cancel()
+        recognitionTask = nil
         recognitionTask = speechRecognizer?.recognitionTask(with: recognitionRequest) { [weak self] result, err in
             Task { @MainActor in
                 if let result, result.isFinal {
@@ -134,16 +139,18 @@ final class SpeechInputService: ObservableObject {
 
     /// 録音停止。この時点の `recognizedText` を確定として返す
     func stopRecording() async -> String {
-        state = .processing
+        state = .transcribing
         audioEngine?.stop()
         recognitionRequest?.endAudio()
         recognitionTask?.cancel()
         recognitionTask = nil
         let text = recognizedText
+        let hadError: Bool = {
+            if case .error = state { return true }
+            return false
+        }()
         reset()
-        if case .error = state { } else {
-            state = .authorized
-        }
+        state = hadError ? state : .completed
         return text
     }
 
@@ -158,8 +165,8 @@ final class SpeechInputService: ObservableObject {
     /// 権限が取れていて利用可能か
     var canRecord: Bool {
         switch state {
-        case .authorized, .idle: return speechRecognizer?.isAvailable ?? false
-        case .recording, .processing: return true
+        case .authorized, .idle, .completed: return speechRecognizer?.isAvailable ?? false
+        case .recording, .processing, .transcribing: return true
         default: return false
         }
     }

@@ -14,9 +14,86 @@ final class GokigenViewModel: ObservableObject {
     @Published var selectedMood: Mood = .neutral
     @Published var draftText: String = ""
 
+    /// 保存前に uid を取る用（AuthGate を通す）
+    weak var authViewModel: AuthViewModel?
+
+    /// 直近の入力が音声か（保存時の inputMethod 用）
+    private var lastInputWasVoice = false
+
+    // MARK: - DraftSession（編集中1件・同一 doc に upsert）
+
+    @Published private(set) var draftSession: DraftSession?
+    @Published private(set) var autoSaveState: AutoSaveState = .idle
+    private var draftEntryId: String? { draftSession?.id }
+    /// 確定処理中の entryId（この id への upsert は行わない）
+    private var finalizingDraftId: String?
+
+    private func startDraftIfNeeded(rawText: String) {
+        let trimmed = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        if draftSession == nil {
+            draftSession = DraftSession(
+                id: UUID().uuidString,
+                rawText: trimmed,
+                scene: selectedScene.rawValue,
+                inputMethod: lastInputWasVoice ? "voice" : "text",
+                moodRaw: String(selectedMood.rawValue)
+            )
+        }
+    }
+
+    private func resetDraft() {
+        draftSession = nil
+        autoSaveState = .idle
+        lastSaveError = nil
+        lastInputWasVoice = false
+        draftText = ""
+        reformulatedText = ""
+        empathyDraft = ""
+        nextStepDraft = ""
+    }
+
+    /// 自動保存中か（記録ボタン無効化用）
+    var isAutoSaving: Bool {
+        if case .saving = autoSaveState { return true }
+        return false
+    }
+
+    /// 自動保存失敗時の再送（同 entryId に upsert で冪等）
+    func retryAutoSave() {
+        let raw = draftText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let rewrite = reformulatedText
+        guard !raw.isEmpty else { return }
+        saveEntryAfterReformulateSuccess(rawText: raw, rewriteText: rewrite)
+    }
+
+    /// DraftSession を唯一の真実として EntryPayload を組む（UIから剥がす）
+    private func makePayloadFromDraft(_ s: DraftSession, now: Date = .now) -> EntryPayload {
+        var client: [String: Any] = ["platform": "iOS"]
+        if let v = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String {
+            client["appVersion"] = v
+        }
+        return EntryPayload(
+            entryId: s.id,
+            dateKey: FirestoreService.dayKey(from: s.createdAtLocal),
+            scene: s.scene,
+            inputMethod: s.inputMethod,
+            rawText: s.rawText,
+            rewriteText: s.rewriteText.isEmpty ? nil : s.rewriteText,
+            empathyText: s.empathyText.isEmpty ? nil : s.empathyText,
+            moodRaw: s.moodRaw.isEmpty ? nil : s.moodRaw,
+            nextStep: s.nextStep.isEmpty ? nil : s.nextStep,
+            promptMeta: nil,
+            model: nil,
+            usage: nil,
+            client: client
+        )
+    }
+
     /// 音声認識結果を入力欄に反映（話す → 整理される の入口）
     func applySpeechInput(_ text: String) {
         draftText = text
+        lastInputWasVoice = true
     }
 
     /// 結果を隠して入力からやり直す（もう一度調整）
@@ -34,6 +111,7 @@ final class GokigenViewModel: ObservableObject {
     @Published private(set) var entries: [Entry] = []
     @Published var lastSuccessMessage: String?
     @Published var lastErrorMessage: String?
+    @Published private(set) var lastSaveError: String?
     @Published private(set) var isLoadingEmpathy: Bool = false
     @Published private(set) var isLoadingReformulation: Bool = false
     @Published private(set) var isLoadingEntries: Bool = false
@@ -418,26 +496,62 @@ final class GokigenViewModel: ObservableObject {
             return
         }
 
+        // 未ログイン時は回数チェック前に止める（P1A）
+        guard let authVM = authViewModel else {
+            publishError(message: "ログインが必要です。")
+            return
+        }
+        do {
+            _ = try AuthGate.requireUID(authVM: authVM)
+        } catch {
+            publishError(message: "ログインが必要です。")
+            return
+        }
+
         // 日次上限は0消費で終了
         guard canCallGeminiAPI() else {
             publishError(message: Copy.dailyLimitReached)
             return
         }
 
-        // 課金枠が無ければPaywall（まだ消費しない）
-        guard ensureQuotaOrOpenPaywall() else { return }
-
-        // リクエスト開始（解除漏れをdeferで潰す）
         guard let token = beginAIRequest(kind: .empathy) else { return }
-
-        // ここで初めて消費＆APIカウント
-        consumeQuota()
         recordGeminiAPICall()
 
         lastGeminiRequest = trimmed
 
         Task { [trimmed, token] in
             defer { Task { @MainActor in self.endAIRequest(token) } }
+
+            // P1A: consumeRewrite でサーバが回数制限・消費。allowed なら AI 実行。
+            do {
+                let draftId = await MainActor.run { self.draftEntryId }
+                let quota = try await QuotaService.shared.consumeRewrite(
+                    op: .empathy,
+                    draftEntryId: draftId
+                )
+
+                await MainActor.run {
+                    guard self.empathyRequestID == token.id else { return }
+                }
+
+                if !quota.allowed {
+                    await MainActor.run {
+                        self.publishError(message: "回数上限に達しました。プレミアムで無制限にできます。")
+                        if quota.paywall { PaywallCoordinator.shared.present() }
+                    }
+                    return
+                }
+            } catch {
+                await MainActor.run {
+                    guard self.empathyRequestID == token.id else { return }
+                    if QuotaService.isUnauthenticated(error) {
+                        self.publishError(message: "ログインが必要です。")
+                    } else {
+                        self.publishError(message: "回数確認に失敗しました。通信状況を確認してください。")
+                    }
+                }
+                return
+            }
 
             do {
                 let response = try await geminiService.generateEmpathy(for: trimmed)
@@ -469,6 +583,8 @@ final class GokigenViewModel: ObservableObject {
             return
         }
 
+        startDraftIfNeeded(rawText: trimmed)
+
         let context = ReformulationContext(
             purpose: reformulationPurpose,
             audience: reformulationAudience,
@@ -483,6 +599,18 @@ final class GokigenViewModel: ObservableObject {
             return
         }
 
+        // 未ログイン時は回数チェック前に止める（P1A: 課金しても使えない状態を防ぐ）
+        guard let authVM = authViewModel else {
+            publishError(message: "ログインが必要です。")
+            return
+        }
+        do {
+            _ = try AuthGate.requireUID(authVM: authVM)
+        } catch {
+            publishError(message: "ログインが必要です。")
+            return
+        }
+
         // 日次上限は0消費でローカル簡易
         guard canCallGeminiAPI() else {
             reformulatedText = EmpathyEngine.reformulateLocal(original: trimmed)
@@ -490,24 +618,48 @@ final class GokigenViewModel: ObservableObject {
             return
         }
 
-        // 課金枠が無ければPaywall（まだ消費しない）
-        guard ensureQuotaOrOpenPaywall() else { return }
-
-        // リクエスト開始
         guard let token = beginAIRequest(kind: .reformulation) else { return }
-
-        // ここで初めて消費＆APIカウント
-        consumeQuota()
         recordGeminiAPICall()
 
         Task { [trimmed, token, context, cacheKey] in
             defer { Task { @MainActor in self.endAIRequest(token) } }
 
+            // P1A: consumeRewrite でサーバが回数制限・消費。allowed なら Gemini 実行。
+            do {
+                let draftId = await MainActor.run { self.draftEntryId }
+                let quota = try await QuotaService.shared.consumeRewrite(
+                    op: .reformulate,
+                    draftEntryId: draftId
+                )
+
+                await MainActor.run {
+                    guard self.reformulationRequestID == token.id else { return }
+                }
+
+                if !quota.allowed {
+                    await MainActor.run {
+                        self.publishError(message: "回数上限に達しました。プレミアムで無制限にできます。")
+                        if quota.paywall { PaywallCoordinator.shared.present() }
+                    }
+                    return
+                }
+            } catch {
+                await MainActor.run {
+                    guard self.reformulationRequestID == token.id else { return }
+                    if QuotaService.isUnauthenticated(error) {
+                        self.publishError(message: "ログインが必要です。")
+                    } else {
+                        self.publishError(message: "回数確認に失敗しました。通信状況を確認してください。")
+                    }
+                }
+                return
+            }
+
+            // OKなら Gemini
             do {
                 let reformulated = try await geminiService.reformulateText(for: trimmed, context: context)
                 await MainActor.run {
                     guard self.reformulationRequestID == token.id else { return }
-
                     self.reformulatedText = reformulated
                     self.setReformulationCache(cacheKey: cacheKey, result: reformulated)
                     if !self.hasShownFirstReformulationSuccess {
@@ -515,16 +667,91 @@ final class GokigenViewModel: ObservableObject {
                         self.lastSuccessMessage = "そのまま使えます"
                     }
                     SpeechPlayer.shared.speak(reformulated)
+                    self.saveEntryAfterReformulateSuccess(rawText: trimmed, rewriteText: reformulated)
                 }
             } catch {
                 print("[Gemini] ERROR reformulateText: \(error)")
                 await MainActor.run {
                     guard self.reformulationRequestID == token.id else { return }
-
                     let fallback = EmpathyEngine.reformulateLocal(original: trimmed)
                     self.reformulatedText = fallback
                     self.publishError(message: Copy.fallbackReformulation)
                     SpeechPlayer.shared.speak(fallback)
+                    self.saveEntryAfterReformulateSuccess(rawText: trimmed, rewriteText: fallback)
+                }
+            }
+        }
+    }
+
+    /// 生成成功後に同一 draft doc へ upsert。一覧追加・入力クリアはしない。
+    private func saveEntryAfterReformulateSuccess(rawText: String, rewriteText: String) {
+        lastSaveError = nil
+        guard let authVM = authViewModel else { return }
+        let uid: String
+        do {
+            uid = try AuthGate.requireUID(authVM: authVM)
+        } catch {
+            return
+        }
+
+        startDraftIfNeeded(rawText: rawText)
+        guard let draftId = draftEntryId else { return }
+        if draftId == finalizingDraftId { return }
+
+        autoSaveState = .saving
+
+        let context = ReformulationContext(
+            purpose: reformulationPurpose,
+            audience: reformulationAudience,
+            tone: reformulationTone,
+            scene: selectedScene
+        )
+        var client: [String: Any] = ["platform": "iOS"]
+        if let v = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String {
+            client["appVersion"] = v
+        }
+        let payload = EntryPayload(
+            entryId: draftId,
+            dateKey: FirestoreService.dayKey(from: Date()),
+            scene: selectedScene.rawValue,
+            inputMethod: lastInputWasVoice ? "voice" : "text",
+            rawText: rawText,
+            rewriteText: rewriteText,
+            empathyText: empathyDraft.isEmpty ? nil : empathyDraft,
+            moodRaw: String(selectedMood.rawValue),
+            nextStep: nextStepDraft.isEmpty ? nil : nextStepDraft,
+            promptMeta: [
+                "purpose": context.purpose.rawValue,
+                "audience": context.audience.rawValue,
+                "tone": context.tone.rawValue
+            ],
+            model: nil,
+            usage: nil,
+            client: client
+        )
+        Task {
+            do {
+                await MainActor.run {
+                    if var session = self.draftSession {
+                        session.rawText = rawText
+                        session.rewriteText = rewriteText
+                        session.empathyText = self.empathyDraft
+                        session.nextStep = self.nextStepDraft
+                        session.scene = self.selectedScene.rawValue
+                        session.inputMethod = self.lastInputWasVoice ? "voice" : "text"
+                        session.moodRaw = String(self.selectedMood.rawValue)
+                        self.draftSession = session
+                    }
+                }
+                try await FirestoreService.shared.upsertEntry(uid: uid, entryId: draftId, payload: payload)
+                await MainActor.run {
+                    self.autoSaveState = .saved
+                    self.lastInputWasVoice = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.lastSaveError = error.localizedDescription
+                    self.autoSaveState = .failed(error.localizedDescription)
                 }
             }
         }
@@ -534,64 +761,89 @@ final class GokigenViewModel: ObservableObject {
 
     @MainActor
     func saveCurrentEntry() {
-        let trimmed = draftText.trimmingCharacters(in: .whitespacesAndNewlines)
+        // 記録する直前にテキストだけある場合も draft を用意（言い換え未実行でも保存可能）
+        startDraftIfNeeded(rawText: draftText)
+        guard let s = draftSession else {
+            publishError(message: "下書きがありません")
+            return
+        }
+        let trimmed = s.rawText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
             publishError(message: Copy.emptyDraft)
             return
         }
 
-        var empathy = empathyDraft
-        var next = nextStepDraft
-        if empathy.isEmpty || next.isEmpty {
-            let fallback = EmpathyEngine.rewrite(original: trimmed, mood: selectedMood)
-            empathy = fallback.0
-            next = fallback.1
+        guard let authVM = authViewModel else {
+            publishError(message: "サインインが必要です")
+            return
+        }
+        let uid: String
+        do {
+            uid = try AuthGate.requireUID(authVM: authVM)
+        } catch {
+            publishError(message: "サインインが必要です")
+            return
         }
 
-        var entry = Entry(
-            date: Date(),
-            mood: selectedMood,
-            originalText: trimmed,
-            reformulatedText: reformulatedText.isEmpty ? nil : reformulatedText,
-            empathyText: empathy,
-            nextStep: next
+        if case .saving = autoSaveState {
+            publishError(message: "保存中です。少し待ってください。")
+            return
+        }
+
+        let draftId = s.id
+        finalizingDraftId = draftId
+        lastSaveError = nil
+
+        // empathy/next が空ならフォールバックして draft に反映（draft を唯一の真実にする）
+        if s.empathyText.isEmpty || s.nextStep.isEmpty {
+            let mood = Mood(rawValue: Int(s.moodRaw) ?? 0) ?? .neutral
+            let (emp, next) = EmpathyEngine.rewrite(original: trimmed, mood: mood)
+            if var session = draftSession {
+                if session.empathyText.isEmpty { session.empathyText = emp }
+                if session.nextStep.isEmpty { session.nextStep = next }
+                draftSession = session
+            }
+        }
+
+        guard let sessionForPayload = draftSession else {
+            publishError(message: "下書きがありません")
+            return
+        }
+        let payload = makePayloadFromDraft(sessionForPayload)
+
+        let moodForEntry = Mood(rawValue: Int(sessionForPayload.moodRaw) ?? 0) ?? .neutral
+        let finalEntry = Entry(
+            id: UUID(uuidString: draftId) ?? UUID(),
+            documentId: draftId,
+            date: sessionForPayload.createdAtLocal,
+            mood: moodForEntry,
+            originalText: sessionForPayload.rawText,
+            reformulatedText: sessionForPayload.rewriteText.isEmpty ? nil : sessionForPayload.rewriteText,
+            empathyText: sessionForPayload.empathyText,
+            nextStep: sessionForPayload.nextStep
         )
-        entry.updatedAt = Date()
 
-        print("💾 [GokigenViewModel] エントリを保存: originalText=\(trimmed.prefix(30))..., reformulatedText=\(reformulatedText.isEmpty ? "なし" : reformulatedText.prefix(30).description + "...")")
-
-        withAnimation(.easeInOut) {
-            entries.insert(entry, at: 0)
-        }
-        if let uid = currentUserId {
-            persistence.saveEntries(entries, userId: uid)
-        } else {
-            persistence.save(entries)
-        }
-
-        // Firestoreにも保存（失敗時は pending に積む。成功時は pending から消す）
-        if let userId = currentUserId {
-            Task {
-                do {
-                    try await firestoreService.saveEntry(entry, for: userId)
-                    dequeuePending(entry.id, userId: userId)
-                    print("✅ [GokigenViewModel] Firestoreへの保存成功")
-                } catch {
-                    enqueuePending(entry.id, userId: userId)
-                    print("❌ [GokigenViewModel] Firestoreへの保存失敗（pending に追加）: \(error.localizedDescription)")
+        Task {
+            do {
+                try await FirestoreService.shared.upsertEntry(uid: uid, entryId: draftId, payload: payload)
+                try await FirestoreService.shared.finalizeEntry(uid: uid, entryId: draftId)
+                await MainActor.run {
+                    withAnimation(.easeInOut) { self.entries.insert(finalEntry, at: 0) }
+                    self.persistence.saveEntries(self.entries, userId: uid)
+                    self.finalizingDraftId = nil
+                    self.resetDraft()
+                    self.selectedMood = .neutral
+                    self.currentPrompt = PromptProvider.random()
+                    self.publishSuccess(message: Copy.saveSuccess)
+                }
+            } catch {
+                await MainActor.run {
+                    self.finalizingDraftId = nil
+                    self.lastSaveError = error.localizedDescription
+                    self.publishError(message: "確定に失敗しました。通信状況を確認してください。")
                 }
             }
-        } else {
-            print("⚠️ [GokigenViewModel] ユーザーIDなし、ローカルのみ保存")
         }
-
-        draftText = ""
-        selectedMood = .neutral
-        empathyDraft = ""
-        nextStepDraft = ""
-        reformulatedText = ""
-        currentPrompt = PromptProvider.random()
-        publishSuccess(message: Copy.saveSuccess)
     }
 
     @MainActor
@@ -611,7 +863,7 @@ final class GokigenViewModel: ObservableObject {
         if let userId = currentUserId {
             Task {
                 for entry in entriesToDelete {
-                    try? await firestoreService.deleteEntry(entry.id, for: userId)
+                    try? await firestoreService.deleteEntry(entryId: entry.documentId ?? entry.id.uuidString, for: userId)
                 }
             }
         }

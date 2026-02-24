@@ -45,6 +45,9 @@ struct MainTabView: View {
                     Label("設定", systemImage: "gearshape")
                 }
         }
+        .onAppear {
+            vm.authViewModel = authVM
+        }
         .task(id: "\(authVM.authReady)_\(authVM.uid ?? "")") {
             guard authVM.authReady, let uid = authVM.uid else {
                 if !authVM.authReady { print("⚠️ authReady=false. skip setUserId") }
@@ -52,6 +55,7 @@ struct MainTabView: View {
                 return
             }
             print("✅ setUserId:", uid)
+            vm.authViewModel = authVM
             vm.setUserId(uid)
             trainingVM.setUserId(uid)
             PremiumManager.shared.setCurrentUserId(uid)

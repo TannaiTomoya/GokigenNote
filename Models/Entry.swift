@@ -8,6 +8,8 @@ import Foundation
 
 struct Entry: Identifiable, Codable, Equatable {
     var id: UUID = UUID()
+    /// Firestore の documentID（auto ID の場合はこちらを使う）
+    var documentId: String?
     var date: Date = Date()
     var mood: Mood
     var originalText: String
@@ -19,6 +21,7 @@ struct Entry: Identifiable, Codable, Equatable {
 
     init(
         id: UUID = UUID(),
+        documentId: String? = nil,
         date: Date = Date(),
         mood: Mood,
         originalText: String,
@@ -28,6 +31,7 @@ struct Entry: Identifiable, Codable, Equatable {
         updatedAt: Date = Date()
     ) {
         self.id = id
+        self.documentId = documentId
         self.date = date
         self.mood = mood
         self.originalText = originalText
@@ -38,12 +42,13 @@ struct Entry: Identifiable, Codable, Equatable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, date, mood, originalText, reformulatedText, empathyText, nextStep, updatedAt
+        case id, documentId, date, mood, originalText, reformulatedText, empathyText, nextStep, updatedAt
     }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(UUID.self, forKey: .id)
+        documentId = try c.decodeIfPresent(String.self, forKey: .documentId)
         date = try c.decode(Date.self, forKey: .date)
         mood = try c.decode(Mood.self, forKey: .mood)
         originalText = try c.decode(String.self, forKey: .originalText)
@@ -56,6 +61,7 @@ struct Entry: Identifiable, Codable, Equatable {
     func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(id, forKey: .id)
+        try c.encode(documentId, forKey: .documentId)
         try c.encode(date, forKey: .date)
         try c.encode(mood, forKey: .mood)
         try c.encode(originalText, forKey: .originalText)

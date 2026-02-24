@@ -12,6 +12,7 @@
 		A86407D62ED1AD02005DD4B1 /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = A86407D52ED1AD02005DD4B1 /* FirebaseAuth */; };
 		A86407DE2ED1BA41005DD4B1 /* FirebaseCore in Frameworks */ = {isa = PBXBuildFile; productRef = A86407DD2ED1BA41005DD4B1 /* FirebaseCore */; };
 		A86407E02ED1BA41005DD4B1 /* FirebaseFirestore in Frameworks */ = {isa = PBXBuildFile; productRef = A86407DF2ED1BA41005DD4B1 /* FirebaseFirestore */; };
+		A86407E22ED1BA42005DD4B1 /* FirebaseFunctions in Frameworks */ = {isa = PBXBuildFile; productRef = A86407E12ED1BA42005DD4B1 /* FirebaseFunctions */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -55,6 +56,7 @@
 				A86406162ED02F1D005DD4B1 /* GoogleGenerativeAI in Frameworks */,
 				A86407DE2ED1BA41005DD4B1 /* FirebaseCore in Frameworks */,
 				A86407E02ED1BA41005DD4B1 /* FirebaseFirestore in Frameworks */,
+				A86407E22ED1BA42005DD4B1 /* FirebaseFunctions in Frameworks */,
 				A86407D62ED1AD02005DD4B1 /* FirebaseAuth in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -111,6 +113,7 @@
 				A86407D52ED1AD02005DD4B1 /* FirebaseAuth */,
 				A86407DD2ED1BA41005DD4B1 /* FirebaseCore */,
 				A86407DF2ED1BA41005DD4B1 /* FirebaseFirestore */,
+				A86407E12ED1BA42005DD4B1 /* FirebaseFunctions */,
 			);
 			productName = GokigenNote;
 			productReference = A864050C2ECCE879005DD4B1 /* GokigenNote.app */;
@@ -427,6 +430,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = A86407D42ED1AD02005DD4B1 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
 			productName = FirebaseFirestore;
+		};
+		A86407E12ED1BA42005DD4B1 /* FirebaseFunctions */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A86407D42ED1AD02005DD4B1 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseFunctions;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
