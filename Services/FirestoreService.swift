@@ -45,7 +45,7 @@ final class FirestoreService {
         if let email = email { data["email"] = email }
         if let displayName = displayName { data["displayName"] = displayName }
 
-        try await db.runTransaction { (transaction, errorPointer) -> Any? in
+        _ = try await db.runTransaction { (transaction, errorPointer) -> Any? in
             do {
                 let snap = try transaction.getDocument(ref)
                 if snap.exists { return nil }
@@ -63,7 +63,7 @@ final class FirestoreService {
     /// 同一 doc に upsert。createdAt は初回のみ、updatedAt は毎回。isFinalized は false で上書き。
     func upsertEntry(uid: String, entryId: String, payload: EntryPayload) async throws {
         let ref = db.collection("users").document(uid).collection("entries").document(entryId)
-        try await db.runTransaction { (txn, errorPointer) -> Any? in
+        _ = try await db.runTransaction { (txn, errorPointer) -> Any? in
             do {
                 let snap = try txn.getDocument(ref)
                 let exists = snap.exists
@@ -102,7 +102,7 @@ final class FirestoreService {
     func finalizeEntry(uid: String, entryId: String) async throws {
         let ref = db.collection("users").document(uid).collection("entries").document(entryId)
 
-        try await db.runTransaction { (txn, errorPointer) -> Any? in
+        _ = try await db.runTransaction { (txn, errorPointer) -> Any? in
             do {
                 let snap = try txn.getDocument(ref)
                 guard snap.exists else {
@@ -153,7 +153,7 @@ final class FirestoreService {
         if let u = payload.usage { data["usage"] = u }
         if let c = payload.client { data["client"] = c }
 
-        try await db.runTransaction { (tx, errorPointer) -> Any? in
+        _ = try await db.runTransaction { (tx, errorPointer) -> Any? in
             do {
                 let snap = try tx.getDocument(ref)
                 if snap.exists, snap.data()?["createdAt"] != nil {

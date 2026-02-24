@@ -103,8 +103,9 @@ struct PaywallView: View {
     }
 
     private var productButtons: some View {
-        VStack(spacing: 12) {
-            ForEach(orderedProducts, id: \.id) { product in
+        let products = orderedProducts
+        return VStack(spacing: 12) {
+            ForEach(products, id: \.id) { product in
                 Button {
                     Task { await pm.purchase(product) }
                 } label: {
@@ -121,7 +122,7 @@ struct PaywallView: View {
                 .buttonStyle(product.id == featuredProductID ? .borderedProminent : .bordered)
             }
 
-            if orderedProducts.isEmpty {
+            if products.isEmpty {
                 Text("商品を取得できませんでした。通信状況やストア設定、サンドボックスでのサインインを確認してください。")
                     .font(.caption)
                     .foregroundStyle(.secondary)
