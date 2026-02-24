@@ -240,9 +240,9 @@ final class PremiumManager: ObservableObject {
             self.availableProducts = storeProducts
             log.info("loadProducts ok. count=\(storeProducts.count, privacy: .public)")
         } catch {
-            self.lastError = "商品情報の取得に失敗しました: \(error.localizedDescription)"
+            self.lastError = "商品取得エラー: \(error)"
             self.availableProducts = []
-            log.error("loadProducts failed: \(error.localizedDescription, privacy: .public)")
+            log.error("loadProducts failed: \(String(describing: error), privacy: .public)")
         }
     }
 
