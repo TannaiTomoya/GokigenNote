@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import Combine
 import Speech
 import AVFoundation
 
@@ -84,7 +85,11 @@ final class SpeechInputService: ObservableObject {
 
         do {
             let session = AVAudioSession.sharedInstance()
-            try session.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetooth])
+            try session.setCategory(
+                .playAndRecord,
+                mode: .measurement,
+                options: [.defaultToSpeaker, .allowBluetoothHFP]
+            )
             try session.setActive(true)
         } catch {
             state = .error("マイクを利用できません")
