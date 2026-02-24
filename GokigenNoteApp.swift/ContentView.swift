@@ -12,22 +12,40 @@ import UIKit
 struct TodayView: View {
     @ObservedObject var vm: GokigenViewModel
     @StateObject private var premium = PremiumManager.shared
+    @StateObject private var speechInput = SpeechInputService()
     @State private var showCopyToast = false
     @State private var shareItem: ShareItem?
+    @State private var showSpeechPermissionAlert = false
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 16) {
                     headerSection
-                    questionCard
-                    moodCard
-                    reformulationContextCard
+                    sceneCard
+                    mainVoiceCard
+                    if !vm.reformulatedText.isEmpty {
+                        resultCard
+                    }
                     inputCard
                     actionRow
+                    DisclosureGroup("詳しく設定") {
+                        VStack(spacing: 12) {
+                            moodCard
+                            questionCard
+                            reformulationContextCard
+                        }
+                        .padding(.vertical, 8)
+                    }
                     Text("AI枠: \(premium.remainingRewriteQuotaText)")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                    if let error = premium.lastError {
+                        Text(error)
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                            .multilineTextAlignment(.center)
+                    }
                     TrendCard(snapshot: vm.trendSnapshot)
                 }
                 .padding()
@@ -36,6 +54,11 @@ struct TodayView: View {
             .navigationTitle("ごきげんノート")
             .navigationBarTitleDisplayMode(.inline)
             .overlay(toastOverlay, alignment: .bottom)
+            .alert("音声認識を利用できません", isPresented: $showSpeechPermissionAlert) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text("設定でマイクと音声認識を許可してください。")
+            }
         }
         .sheet(item: $shareItem) { item in
             ActivityViewController(activityItems: [item.text])
@@ -86,10 +109,145 @@ struct TodayView: View {
         }
     }
 
+    /// ① 場面（だけ選ぶ → 即話す）
+    private var sceneCard: some View {
+        cardContainer {
+            Picker("場面", selection: $vm.selectedScene) {
+                ForEach(ReformulationScene.allCases) { scene in
+                    Text(scene.displayName).tag(scene)
+                }
+            }
+            .pickerStyle(.segmented)
+        }
+    }
+
+    /// ② 主役：話す → 整う
+    private var mainVoiceCard: some View {
+        cardContainer {
+            VStack(spacing: 16) {
+                Text("言いたいこと、整えて返します")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                Button {
+                    toggleVoiceInput()
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: speechInput.state == .recording ? "stop.circle.fill" : "mic.fill")
+                            .font(.title)
+                        Text(speechInput.state == .recording ? "停止" : "話す")
+                            .font(.title3.weight(.semibold))
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 20)
+                    .background(speechInput.state == .recording ? Color.red.opacity(0.15) : Color.accentColor.opacity(0.15), in: RoundedRectangle(cornerRadius: 16))
+                    .foregroundStyle(speechInput.state == .recording ? .red : .accentColor)
+                }
+                .buttonStyle(.plain)
+                .disabled(speechInput.state == .processing)
+                .accessibilityLabel(speechInput.state == .recording ? "音声入力を停止" : "話す")
+                if speechInput.state == .recording && !speechInput.recognizedText.isEmpty {
+                    Text(speechInput.recognizedText)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+        }
+    }
+
+    /// 結果エリア（before/after ＋ 次の一手：送る・もう一度調整）
+    private var resultCard: some View {
+        cardContainer {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("そのまま使える")
+                    .font(.caption)
+                    .fontWeight(.medium)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Color.green.opacity(0.15), in: Capsule())
+                    .foregroundStyle(.green)
+
+                if !vm.draftText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("入力")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        Text(vm.draftText.trimmingCharacters(in: .whitespacesAndNewlines))
+                            .font(.caption)
+                            .lineLimit(2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("出力")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Text(vm.reformulatedText)
+                        .font(.body)
+                        .padding()
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color(.tertiarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
+                }
+
+                HStack(spacing: 12) {
+                    Button {
+                        copyReformulatedText()
+                        vm.lastSuccessMessage = "コピーしました。LINEなどに貼って送れます"
+                    } label: {
+                        Label("送る（LINE想定）", systemImage: "paperplane")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+
+                    Button {
+                        vm.clearReformulatedResult()
+                    } label: {
+                        Label("もう一度調整", systemImage: "arrow.uturn.backward")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                }
+
+                HStack(spacing: 8) {
+                    Button(action: { SpeechPlayer.shared.speak(vm.reformulatedText) }) {
+                        Label("再生", systemImage: "speaker.wave.2")
+                            .font(.caption)
+                    }
+                    .buttonStyle(.bordered)
+                    Button(action: vm.saveCurrentEntry) {
+                        Label("記録する", systemImage: "bookmark")
+                            .font(.caption)
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(vm.draftText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+
+                if !premium.effectivePlan.isPremium {
+                    Button {
+                        PaywallCoordinator.shared.present()
+                    } label: {
+                        HStack {
+                            Text("この表現、もっと良くできます（プレミアム）")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Image(systemName: "chevron.right")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+
+    /// 感情（状態）・詳しく設定用
     private var moodCard: some View {
         cardContainer {
             VStack(alignment: .leading, spacing: 12) {
-                Text("今日の気分")
+                Text("今の気分")
                     .font(.headline)
                 Picker("気分", selection: $vm.selectedMood) {
                     ForEach(Mood.allCases) { mood in
@@ -103,6 +261,7 @@ struct TodayView: View {
         }
     }
 
+    /// 伝え方の詳細（目的・相手・トーン）
     private var reformulationContextCard: some View {
         cardContainer {
             VStack(alignment: .leading, spacing: 12) {
@@ -145,75 +304,28 @@ struct TodayView: View {
         }
     }
 
+    /// 入力（書く場合）
     private var inputCard: some View {
         cardContainer {
-            VStack(alignment: .leading, spacing: 12) {
-                Text("感じたことを書く")
-                    .font(.headline)
+            VStack(alignment: .leading, spacing: 8) {
+                Text("書いて整える")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 ZStack(alignment: .topLeading) {
                     if vm.draftText.isEmpty {
-                        Text("今日は何が一番心に残った？")
+                        Text("入力 or 上で「話す」")
                             .foregroundStyle(.secondary)
                             .padding(.top, 8)
                             .padding(.horizontal, 6)
                     }
                     TextEditor(text: $vm.draftText)
-                        .frame(minHeight: 150)
-                        .cornerRadius(15)
+                        .frame(minHeight: 80)
+                        .cornerRadius(12)
                         .overlay(
-                            RoundedRectangle(cornerRadius: 15)
+                            RoundedRectangle(cornerRadius: 12)
                                 .stroke(Color(.separator), lineWidth: 0.5)
                         )
-                        .accessibilityHint("感じたことを自由に入力できます")
                 }
-
-                // 言語化された文章を表示
-                if !vm.reformulatedText.isEmpty {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Divider()
-                        HStack {
-                            Text("言い換え")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            Spacer()
-                            // コピー＆共有ボタン
-                            HStack(spacing: 8) {
-                                Button(action: { copyReformulatedText() }) {
-                                    Label("コピー", systemImage: "doc.on.doc")
-                                        .font(.caption)
-                                        .labelStyle(.iconOnly)
-                                }
-                                .buttonStyle(.bordered)
-                                .buttonBorderShape(.circle)
-
-                                Button(action: { shareReformulatedText() }) {
-                                    Label("共有", systemImage: "square.and.arrow.up")
-                                        .font(.caption)
-                                        .labelStyle(.iconOnly)
-                                }
-                                .buttonStyle(.bordered)
-                                .buttonBorderShape(.circle)
-                            }
-                        }
-                        Text(vm.reformulatedText)
-                            .font(.body)
-                            .padding()
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(
-                                Color(.tertiarySystemBackground),
-                                in: RoundedRectangle(cornerRadius: 12))
-                    }
-                    .transition(.opacity.combined(with: .move(edge: .top)))
-                }
-
-                Button(action: vm.saveCurrentEntry) {
-                    Text("この一言を記録する")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(.blue)
-                .disabled(vm.draftText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                .accessibilityHint("今の気持ちを履歴に残します")
             }
         }
     }
@@ -257,6 +369,30 @@ struct TodayView: View {
     }
 
     // MARK: - Helper Functions
+
+    private func toggleVoiceInput() {
+        switch speechInput.state {
+        case .recording:
+            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+            Task {
+                let text = await speechInput.stopRecording()
+                if !text.isEmpty {
+                    vm.applySpeechInput(text)
+                    try? await Task.sleep(nanoseconds: 500_000_000)
+                    vm.reformulateText()
+                }
+            }
+        case .denied, .restricted:
+            showSpeechPermissionAlert = true
+        case .notDetermined, .idle, .authorized, .processing:
+            if speechInput.state == .processing { return }
+            Task {
+                await speechInput.startRecording()
+            }
+        case .error:
+            showSpeechPermissionAlert = true
+        }
+    }
 
     private func copyReformulatedText() {
         UIPasteboard.general.string = vm.reformulatedText

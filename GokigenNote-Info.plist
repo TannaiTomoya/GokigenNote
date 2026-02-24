@@ -2,6 +2,10 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>感じたことを音声で入力するためにマイクを使います。</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>話した内容をテキストに変換して入力欄に反映するために音声認識を使います。</string>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>

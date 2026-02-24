@@ -45,14 +45,27 @@ struct MainTabView: View {
                     Label("設定", systemImage: "gearshape")
                 }
         }
-        .task(id: authVM.currentUser?.id) {
-            guard let userId = authVM.currentUser?.id else {
-                print("⚠️ userId is nil. skip setUserId")
+        .task(id: "\(authVM.authReady)_\(authVM.uid ?? "")") {
+            guard authVM.authReady, let uid = authVM.uid else {
+                if !authVM.authReady { print("⚠️ authReady=false. skip setUserId") }
+                else { print("⚠️ uid is nil. skip setUserId") }
                 return
             }
-            print("✅ setUserId:", userId)
-            vm.setUserId(userId)
-            trainingVM.setUserId(userId)
+            print("✅ setUserId:", uid)
+            vm.setUserId(uid)
+            trainingVM.setUserId(uid)
+            PremiumManager.shared.setCurrentUserId(uid)
+        }
+        .onChange(of: authVM.uid) { _, newUID in
+            if authVM.authReady, let uid = newUID {
+                vm.setUserId(uid)
+                trainingVM.setUserId(uid)
+                PremiumManager.shared.setCurrentUserId(uid)
+            } else {
+                vm.clearUserId()
+                trainingVM.clearUserId()
+                PremiumManager.shared.setCurrentUserId(nil)
+            }
         }
         .onChange(of: network.isOnline) { _, isOnline in
             guard isOnline else { return }

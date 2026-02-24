@@ -14,7 +14,10 @@ struct GokigenNoteApp: App {
     @ObservedObject private var paywall = PaywallCoordinator.shared
 
     init() {
-        FirebaseApp.configure()
+        if FirebaseApp.app() == nil {
+            FirebaseApp.configure()
+        }
+        PremiumManager.shared.start()
     }
     
     var body: some Scene {
@@ -25,9 +28,6 @@ struct GokigenNoteApp: App {
                 } else {
                     AuthView(authVM: authVM)
                 }
-            }
-            .task {
-                PremiumManager.shared.start()
             }
             .sheet(isPresented: Binding(
                 get: { paywall.isPresented },

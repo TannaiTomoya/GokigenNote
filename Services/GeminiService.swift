@@ -137,29 +137,25 @@ final class GeminiService {
         guard let client else { throw GeminiError.apiKeyNotAvailable }
 
         logger.info("Requesting text reformulation...")
+        let sceneName = context.scene.displayName
         let prompt = """
-        あなたは、言語化が苦手な人をサポートする優しい日本語アシスタントです。
+        以下の発言を「\(sceneName)」の場面で自然に伝わる表現に言い換えてください。
 
-        ユーザーが入力した文章：
-        「\(text)」
+        ・相手に伝わる
+        ・誤解されない
+        ・簡潔
 
-        【伝え方の指定】
+        【追加の指定】
         - 目的：\(context.purpose.rawValue)
         - 相手：\(context.audience.rawValue)
         - トーン：\(context.tone.rawValue)
 
-        上記の指定に沿って、この文章を綺麗に言語化してください。
+        入力:
+        \(text)
 
-        1) ユーザーの気持ちや考えを正確に理解し、指定の目的・相手・トーンに合う表現にする
-        2) 自然で読みやすい日本語にする
-        3) ユーザーの意図を変えずに、より伝わりやすい表現にする
-        4) 必要に応じて、曖昧な部分を補完する
-        5) 文章を一つにまとめて、簡潔に表現する（200文字以内）
-
-        【重要】説明や前置きは不要です。整形した文章だけを返してください。
-        【重要】「整形した文章：」などのラベルも不要です。文章のみを返してください。
+        上記に沿って言語化し、200文字以内でまとめてください。説明やラベルは不要です。文章のみを返してください。
         """
-        print("[Gemini] API Request: reformulateText, text=\(text), purpose=\(context.purpose.rawValue), audience=\(context.audience.rawValue), tone=\(context.tone.rawValue)")
+        print("[Gemini] API Request: reformulateText, text=\(text), scene=\(sceneName), purpose=\(context.purpose.rawValue), audience=\(context.audience.rawValue), tone=\(context.tone.rawValue)")
 
         do {
             let raw = try await withTimeout(15) { [client] in

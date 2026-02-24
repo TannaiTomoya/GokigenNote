@@ -15,6 +15,31 @@ final class FirestoreService {
     private let db = Firestore.firestore()
     
     private init() {}
+
+    // MARK: - User Document（UID を主キーにした初回作成・idempotent）
+
+    /// サインイン直後に1回だけ呼ぶ。既にドキュメントがあれば何もしない。
+    func ensureUserDoc(uid: String, email: String?, displayName: String?) async throws {
+        let ref = db.collection("users").document(uid)
+        var data: [String: Any] = [
+            "createdAt": FieldValue.serverTimestamp(),
+            "version": 1
+        ]
+        if let email = email { data["email"] = email }
+        if let displayName = displayName { data["displayName"] = displayName }
+
+        try await db.runTransaction { (transaction, errorPointer) -> Any? in
+            do {
+                let snap = try transaction.getDocument(ref)
+                if snap.exists { return nil }
+                transaction.setData(data, forDocument: ref)
+                return nil
+            } catch {
+                errorPointer?.pointee = error as NSError
+                return nil
+            }
+        }
+    }
     
     // MARK: - Entries Management
     

@@ -2,10 +2,29 @@
 //  ReformulationContext.swift
 //  GokigenNote
 //
-//  言い換えの「目的・相手・トーン」選択用。Firebase は使用しない。
+//  言い換えの「目的・相手・トーン・場面」選択用。Firebase は使用しない。
 //
 
 import Foundation
+
+/// 場面（仕事／恋愛／日常／学校）。最初に選ぶ → 話す → 整う → 使える
+enum ReformulationScene: String, CaseIterable, Identifiable {
+    case work
+    case romance
+    case daily
+    case school
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .work: return "仕事"
+        case .romance: return "恋愛"
+        case .daily: return "日常"
+        case .school: return "学校"
+        }
+    }
+}
 
 /// Step1: 何を伝えたいか
 enum ReformulationPurpose: String, CaseIterable, Identifiable {
@@ -42,15 +61,17 @@ enum ReformulationTone: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
-/// 言い換え生成に渡すコンテキスト（目的・相手・トーン）
+/// 言い換え生成に渡すコンテキスト（目的・相手・トーン・場面）
 struct ReformulationContext {
     var purpose: ReformulationPurpose
     var audience: ReformulationAudience
     var tone: ReformulationTone
+    var scene: ReformulationScene
 
     static let `default` = ReformulationContext(
         purpose: .shareFeeling,
         audience: .colleague,
-        tone: .soft
+        tone: .soft,
+        scene: .work
     )
 }

@@ -15,7 +15,9 @@ struct SettingsView: View {
     @State private var isSharePresented = false
     @State private var showDeleteAlert = false
     @State private var showSignOutAlert = false
-    
+    @State private var showTerms = false
+    @State private var showPrivacy = false
+
     var body: some View {
         NavigationStack {
             List {
@@ -48,9 +50,16 @@ struct SettingsView: View {
                         HStack {
                             Label("プレミアム", systemImage: "crown.fill")
                             Spacer()
-                            Text(premium.remainingRewriteQuotaText)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                            VStack(alignment: .trailing, spacing: 2) {
+                                Text(premium.remainingRewriteQuotaText)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                if !premium.entitlementsLoaded {
+                                    Text("状態確認中…")
+                                        .font(.caption2)
+                                        .foregroundStyle(.tertiary)
+                                }
+                            }
                         }
                     }
                 } header: {
@@ -99,6 +108,15 @@ struct SettingsView: View {
                 }
                 
                 // アプリ情報セクション
+                Section("法的表示") {
+                    Button { showTerms = true } label: {
+                        Label("利用規約", systemImage: "doc.text")
+                    }
+                    Button { showPrivacy = true } label: {
+                        Label("プライバシーポリシー", systemImage: "hand.raised")
+                    }
+                }
+
                 Section("アプリ情報") {
                     HStack {
                         Text("バージョン")
@@ -177,6 +195,12 @@ struct SettingsView: View {
             }
         } message: {
             Text("ログアウトしてもよろしいですか？")
+        }
+        .sheet(isPresented: $showTerms) {
+            TermsOfServiceView()
+        }
+        .sheet(isPresented: $showPrivacy) {
+            PrivacyPolicyView()
         }
     }
     

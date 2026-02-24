@@ -11,6 +11,8 @@ import StoreKit
 struct PaywallView: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject private var pm = PremiumManager.shared
+    @State private var showTerms = false
+    @State private var showPrivacy = false
 
     var body: some View {
         NavigationStack {
@@ -43,10 +45,16 @@ struct PaywallView: View {
                 }
             }
             .task {
-                if pm.products.isEmpty {
+                if pm.availableProducts.isEmpty {
                     await pm.loadProducts()
                 }
-                await pm.refreshEntitlements()
+                await pm.refreshEntitlements(mode: .startupCautious)
+            }
+            .sheet(isPresented: $showTerms) {
+                TermsOfServiceView()
+            }
+            .sheet(isPresented: $showPrivacy) {
+                PrivacyPolicyView()
             }
         }
     }
@@ -61,9 +69,16 @@ struct PaywallView: View {
                 .foregroundStyle(.secondary)
 
             HStack {
-                Text("現在: \(planText(pm.plan))")
+                Text("現在: \(planText(pm.effectivePlan))")
                 Spacer()
-                Text("AI枠: \(pm.remainingRewriteQuotaText)")
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text("AI枠: \(pm.remainingRewriteQuotaText)")
+                    if !pm.entitlementsLoaded {
+                        Text("状態確認中…")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                    }
+                }
             }
             .font(.caption)
             .foregroundStyle(.secondary)
@@ -72,10 +87,10 @@ struct PaywallView: View {
     }
 
     private var featureList: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Label("言い換え・共感生成 無制限", systemImage: "infinity")
-            Label("テンプレ保存（今後）", systemImage: "bookmark")
-            Label("シチュエーション別（今後）", systemImage: "person.2")
+        VStack(alignment: .leading, spacing: 8) {
+            Text("・言い換え無制限")
+            Text("・共感生成無制限")
+            Text("・思考整理を加速")
         }
         .font(.subheadline)
         .padding()
@@ -85,38 +100,29 @@ struct PaywallView: View {
 
     private var productButtons: some View {
         VStack(spacing: 12) {
-            if let monthly = pm.products.first(where: { $0.id == ProductID.premiumMonthly }) {
+            ForEach(orderedProducts, id: \.id) { product in
                 Button {
-                    Task { await pm.purchase(monthly) }
+                    Task { await pm.purchase(product) }
                 } label: {
                     HStack {
                         VStack(alignment: .leading, spacing: 2) {
-                            Text("プレミアム（月額）").fontWeight(.semibold)
-                            Text(priceText(monthly)).font(.caption).foregroundStyle(.secondary)
+                            Text(ProductID.displayName(for: product.id)).fontWeight(.semibold)
+                            Text(priceText(product)).font(.caption).foregroundStyle(.secondary)
                         }
                         Spacer()
                         Image(systemName: "chevron.right").font(.caption)
                     }
                     .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(product.id == featuredProductID ? .borderedProminent : .bordered)
             }
 
-            if let lifetime = pm.products.first(where: { $0.id == ProductID.lifetime }) {
-                Button {
-                    Task { await pm.purchase(lifetime) }
-                } label: {
-                    HStack {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("買い切り").fontWeight(.semibold)
-                            Text(priceText(lifetime)).font(.caption).foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                        Image(systemName: "chevron.right").font(.caption)
-                    }
-                    .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.bordered)
+            if orderedProducts.isEmpty {
+                Text("商品を取得できませんでした。通信状況やストア設定、サンドボックスでのサインインを確認してください。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.vertical, 8)
             }
 
             Button("購入を復元") {
@@ -135,7 +141,13 @@ struct PaywallView: View {
     }
 
     private var footer: some View {
-        VStack(spacing: 6) {
+        VStack(spacing: 8) {
+            HStack(spacing: 16) {
+                Button("利用規約") { showTerms = true }
+                    .font(.caption)
+                Button("プライバシーポリシー") { showPrivacy = true }
+                    .font(.caption)
+            }
             Text("※購入はいつでもキャンセル/管理できます（App Storeのサブスクリプション）。")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
@@ -145,14 +157,26 @@ struct PaywallView: View {
     }
 
     private func planText(_ plan: Plan) -> String {
-        switch plan {
-        case .free: return "無料"
-        case .premium: return "プレミアム"
-        case .lifetime: return "買い切り"
-        }
+        plan.displayName
     }
 
     private func priceText(_ product: Product) -> String {
         product.displayPrice
+    }
+
+    /// 表示順：ProductID.sortKey で並べ替え（存在するものだけ、追加時も漏れない）
+    private var orderedProducts: [Product] {
+        pm.availableProducts.sorted {
+            ProductID.sortKey(for: $0.id) < ProductID.sortKey(for: $1.id)
+        }
+    }
+
+    /// 推し商品（存在する中で優先：年額 → 月額 → 買い切り）。該当なしなら nil
+    private var featuredProductID: String? {
+        let ids = Set(pm.availableProducts.map(\.id))
+        if ids.contains(ProductID.premiumYearly) { return ProductID.premiumYearly }
+        if ids.contains(ProductID.premiumMonthly) { return ProductID.premiumMonthly }
+        if ids.contains(ProductID.lifetime) { return ProductID.lifetime }
+        return nil
     }
 }

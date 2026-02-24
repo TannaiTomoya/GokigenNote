@@ -79,6 +79,16 @@ final class AuthService {
         }
     }
 
+    /// 匿名ユーザーなら link（UID維持）、そうでなければ signIn。端末乗り換え時の「課金が消える」を防ぐ。
+    func linkOrSignIn(with credential: AuthCredential) async throws -> FirebaseAuth.User {
+        if let user = Auth.auth().currentUser, user.isAnonymous {
+            let result = try await user.link(with: credential)
+            return result.user
+        }
+        let result = try await Auth.auth().signIn(with: credential)
+        return result.user
+    }
+
     // MARK: - Google Sign In (OAuth Provider)
 
     @MainActor
@@ -94,8 +104,7 @@ final class AuthService {
         do {
             let uiDelegate = AuthUIViewControllerDelegate(viewController: presenter)
             let credential = try await provider.credential(with: uiDelegate)
-            let result = try await Auth.auth().signIn(with: credential)
-            return result.user
+            return try await linkOrSignIn(with: credential)
         } catch let error as NSError {
             throw mapFirebaseError(error)
         }

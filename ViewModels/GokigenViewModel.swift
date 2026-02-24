@@ -13,9 +13,20 @@ import FirebaseFirestore
 final class GokigenViewModel: ObservableObject {
     @Published var selectedMood: Mood = .neutral
     @Published var draftText: String = ""
+
+    /// 音声認識結果を入力欄に反映（話す → 整理される の入口）
+    func applySpeechInput(_ text: String) {
+        draftText = text
+    }
+
+    /// 結果を隠して入力からやり直す（もう一度調整）
+    func clearReformulatedResult() {
+        reformulatedText = ""
+    }
     @Published var reformulationPurpose: ReformulationPurpose = .shareFeeling
     @Published var reformulationAudience: ReformulationAudience = .colleague
     @Published var reformulationTone: ReformulationTone = .soft
+    @Published var selectedScene: ReformulationScene = .work
     @Published var currentPrompt: String
     @Published private(set) var empathyDraft: String = ""
     @Published private(set) var nextStepDraft: String = ""
@@ -45,6 +56,7 @@ final class GokigenViewModel: ObservableObject {
 
     private var reformulationCache: [String: String] = [:]
     private var reformulationCacheOrder: [String] = []
+    private var hasShownFirstReformulationSuccess = false
 
     // “古いレスポンスがUIを上書き”防止用
     private var empathyRequestID: UUID?
@@ -96,10 +108,15 @@ final class GokigenViewModel: ObservableObject {
         }
     }
 
-    /// ここでは “消費しない”。不足なら Paywall（Coordinator が throttle を担当）
+    /// ここでは “消費しない”。不足なら Paywall。未ロード時は仮許可（UX優先）
     @MainActor
     private func ensureQuotaOrOpenPaywall() -> Bool {
         let pm = PremiumManager.shared
+
+        if !pm.entitlementsLoaded {
+            return true
+        }
+
         guard pm.canConsumeRewriteQuota() else {
             publishError(message: "回数上限に達しました（\(pm.remainingRewriteQuotaText)）。プレミアムで無制限にできます。")
             PaywallCoordinator.shared.present()
@@ -148,9 +165,9 @@ final class GokigenViewModel: ObservableObject {
         UserDefaults.standard.set(count + 1, forKey: keyCount)
     }
 
-    /// 目的・相手・トーンを含むキャッシュキー（同じ入力でもコンテキストで別結果）
+    /// 目的・相手・トーン・場面を含むキャッシュキー（同じ入力でもコンテキストで別結果）
     private func reformulationCacheKey(trimmed: String) -> String {
-        "\(trimmed)|\(reformulationPurpose.rawValue)|\(reformulationAudience.rawValue)|\(reformulationTone.rawValue)"
+        "\(trimmed)|\(reformulationPurpose.rawValue)|\(reformulationAudience.rawValue)|\(reformulationTone.rawValue)|\(selectedScene.rawValue)"
     }
 
     /// 言い換え結果をキャッシュに追加（最大件数で古いものを削除）（Phase 1）
@@ -216,6 +233,13 @@ final class GokigenViewModel: ObservableObject {
 
         // ③ 裏で Firestore 初回ページ同期
         loadInitial(userId: userId)
+    }
+
+    /// ログアウト時など。前ユーザー参照が残らないように必ず呼ぶ。
+    func clearUserId() {
+        guard currentUserId != nil else { return }
+        currentUserId = nil
+        entries = []
     }
 
     /// Firestore 保存失敗時に pending に積む
@@ -448,7 +472,8 @@ final class GokigenViewModel: ObservableObject {
         let context = ReformulationContext(
             purpose: reformulationPurpose,
             audience: reformulationAudience,
-            tone: reformulationTone
+            tone: reformulationTone,
+            scene: selectedScene
         )
         let cacheKey = reformulationCacheKey(trimmed: trimmed)
 
@@ -485,14 +510,21 @@ final class GokigenViewModel: ObservableObject {
 
                     self.reformulatedText = reformulated
                     self.setReformulationCache(cacheKey: cacheKey, result: reformulated)
+                    if !self.hasShownFirstReformulationSuccess {
+                        self.hasShownFirstReformulationSuccess = true
+                        self.lastSuccessMessage = "そのまま使えます"
+                    }
+                    SpeechPlayer.shared.speak(reformulated)
                 }
             } catch {
                 print("[Gemini] ERROR reformulateText: \(error)")
                 await MainActor.run {
                     guard self.reformulationRequestID == token.id else { return }
 
-                    self.reformulatedText = EmpathyEngine.reformulateLocal(original: trimmed)
+                    let fallback = EmpathyEngine.reformulateLocal(original: trimmed)
+                    self.reformulatedText = fallback
                     self.publishError(message: Copy.fallbackReformulation)
+                    SpeechPlayer.shared.speak(fallback)
                 }
             }
         }

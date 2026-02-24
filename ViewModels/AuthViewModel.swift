@@ -13,13 +13,17 @@ import FirebaseAuth
 @MainActor
 final class AuthViewModel: ObservableObject {
     @Published var currentUser: User?
-    @Published var isAuthenticated = false
+    @Published private(set) var isAuthenticated = false
+    @Published private(set) var authReady = false
+    @Published private(set) var uid: String?
     @Published private(set) var isLoading = false
     @Published var errorMessage: String?
     @Published var successMessage: String?
 
     private let authService = AuthService.shared
     private var authStateHandle: AuthStateDidChangeListenerHandle?
+    /// セッション復元でも ensureUserDoc を1回だけ叩くための重複防止
+    private var ensuredUserDocUID: String?
 
     init() {
         print("✅ AuthViewModel init. isLoading=\(isLoading)")
@@ -37,12 +41,13 @@ final class AuthViewModel: ObservableObject {
         }
     }
 
-    // MARK: - Auth State Listener
+    // MARK: - Auth State Listener（確定前にDBを触らない＝authReady でゲート）
 
     private func setupAuthStateListener() {
         authStateHandle = Auth.auth().addStateDidChangeListener { [weak self] _, user in
+            guard let self else { return }
             Task { @MainActor in
-                guard let self else { return }
+                self.uid = user?.uid
                 if let user {
                     self.currentUser = User(
                         id: user.uid,
@@ -53,6 +58,22 @@ final class AuthViewModel: ObservableObject {
                 } else {
                     self.currentUser = nil
                     self.isAuthenticated = false
+                    self.ensuredUserDocUID = nil
+                }
+                self.authReady = true
+
+                // セッション復元でも必ず user doc を用意（idempotent・重複防止）
+                if let u = user, self.ensuredUserDocUID != u.uid {
+                    self.ensuredUserDocUID = u.uid
+                    do {
+                        try await FirestoreService.shared.ensureUserDoc(
+                            uid: u.uid,
+                            email: u.email,
+                            displayName: u.displayName
+                        )
+                    } catch {
+                        print("[AuthViewModel] ensureUserDoc failed: \(error)")
+                    }
                 }
             }
         }

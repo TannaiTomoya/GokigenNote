@@ -33,6 +33,11 @@ final class TrainingViewModel: ObservableObject {
         currentUserId = userId
     }
 
+    /// ログアウト時など。前ユーザー参照が残らないように必ず呼ぶ。
+    func clearUserId() {
+        currentUserId = nil
+    }
+
     // MARK: - Game Completion
 
     func completeGame(gameType: GameType, score: Int, correctCount: Int, totalCount: Int) {
