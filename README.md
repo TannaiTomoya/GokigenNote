@@ -4,165 +4,127 @@
 
 ## 📱 主な機能
 
-### ✨ 気分の記録
-- 5段階の気分選択（😊 🙂 😐 😞 😢）
-- 自由なテキスト入力
-- 気分に応じた例文挿入
+### 🔐 認証
+- Firebase Authentication（メール/パスワード、Google Sign-In）
+- 未ログイン時は AuthView、ログイン後は MainTabView
 
-### 💬 やさしい言い換え
-- ローカルの感情分析エンジン（`EmpathyEngine`）
-- Google Gemini API との連携（オプション）
-- ユーザーを否定しない、前向きなフィードバック
+### ✨ 今日の問い（メイン）
+- 場面・気分選択、テキストまたは**音声入力**で「言いたいこと」を入力
+- **言い換え**：Gemini API でやさしい表現に変換（送る／もう一度調整／記録する）
+- **DraftSession**：編集中1件を Firestore にオートセーブ（upsert）、記録で確定
+- 共通枠（言い換え・共感の合算）の**回数制限**表示
 
-### 📊 傾向分析
-- 直近14件の記録から傾向を分析
-- 平均スコア、ポジティブ/ネガティブ比率
-- 連続記録日数のトラッキング
+### 💬 言い換え・共感
+- Google Gemini API で言い換え・共感メッセージ生成
+- 無料は1日10回、買い切りは月200回、サブスクは無制限（PremiumManager）
 
-### 💾 データ管理
-- ローカルストレージでのプライバシー保護
-- JSON形式でのデータエクスポート
-- ShareSheetによる簡単なバックアップ
+### 📊 トレーニング
+- 脳トレ系ミニゲーム（N-back、数字記憶、逆記憶など）とトレーニング履歴
+
+### 📅 カレンダー・記録
+- カレンダー表示、履歴一覧（HistoryListView）、エントリ詳細
+
+### 💾 データ
+- **Firestore**：ログイン後の記録（users/{uid}/entries）、DraftSession の upsert
+- **課金状態**：StoreKit 2、Firebase Functions の `syncEntitlements` でサーバと同期
+
+### 🛒 課金（Paywall）
+- 無料 / 月額・年額サブスク / 買い切り（Lifetime）
+- PaywallCoordinator で PaywallView をシート表示
 
 ## 🛠️ 技術スタック
 
-- **フレームワーク**: SwiftUI
-- **最小対応バージョン**: iOS 18.0+
+- **UI**: SwiftUI（iOS）
+- **認証**: Firebase Auth
+- **DB**: Firebase Firestore
+- **課金**: StoreKit 2、Firebase Functions（syncEntitlements）
+- **AI**: Google Gemini API（GoogleGenerativeAI SPM）
+- **音声**: Speech framework、AVAudioEngine（iOS のみ AVAudioSession）
 - **アーキテクチャ**: MVVM
-- **データ永続化**: UserDefaults + Codable
-- **AI連携**: Google Gemini API (Optional)
 
-## 📂 プロジェクト構造
+## 📂 プロジェクト構造（抜粋）
 
 ```
 GokigenNote/
+├── GokigenNoteApp.swift/
+│   ├── GokigenNoteApp.swift   # エントリポイント（FirebaseCore, PremiumManager.start, Paywall）
+│   └── ContentView.swift      # TodayView（今日の問い・言い換え・音声・記録）
 ├── Models/
-│   ├── Entry.swift          # 日記エントリのデータモデル
-│   ├── Mood.swift            # 気分の定義（5段階）
-│   ├── PromptProvider.swift  # ランダムな問いの提供
-│   └── TrendSnapshot.swift   # 傾向分析のデータ構造
+│   ├── Entry.swift            # 記録エントリ
+│   ├── DraftSession.swift    # 編集中1件・AutoSaveState・Firestore upsert用
+│   ├── Mood.swift             # 気分
+│   ├── ReformulationContext.swift
+│   ├── TrendSnapshot.swift
+│   └── ...
 ├── Views/
-│   ├── ContentView.swift     # メイン画面
-│   ├── HistoryListView.swift # 履歴一覧
-│   └── EntryDetailView.swift # 詳細表示
+│   ├── MainTabView.swift      # タブ: 今日の問い / トレーニング / カレンダー / 記録 / 設定
+│   ├── AuthView.swift
+│   ├── PaywallView.swift
+│   ├── HistoryListView.swift, CalendarView.swift, EntryDetailView.swift
+│   ├── SettingsView.swift
+│   └── Training/              # トレーニング関連
 ├── ViewModels/
-│   └── GokigenViewModel.swift # ビジネスロジック
-├── Services/
-│   ├── Persistence.swift     # データ永続化
-│   ├── EmpathyEngine.swift   # ローカル言い換えエンジン
-│   ├── GeminiService.swift   # Gemini API連携
-│   └── APIKey.swift          # API キー管理
-└── GokigenNoteApp.swift/
-    ├── GokigenNoteApp.swift  # アプリエントリーポイント
-    └── Assets.xcassets/      # アセット
+│   ├── GokigenViewModel.swift # メインVM（DraftSession, 言い換え, 保存, 履歴）
+│   ├── AuthViewModel.swift
+│   └── TrainingViewModel.swift
+└── Services/
+    ├── FirestoreService.swift # users/entries upsert, DraftSession, 履歴取得
+    ├── PremiumManager.swift   # 課金・共通枠（rewriteQuota）
+    ├── GeminiService.swift    # Gemini API
+    ├── SpeechInputService.swift # 音声→テキスト
+    ├── AuthService.swift, AuthGate.swift
+    ├── PaywallCoordinator.swift
+    └── ...
 ```
 
-## 🔐 Gemini API の設定（オプション）
+## 🔧 セットアップ
 
-1. [Google AI Studio](https://aistudio.google.com/apikey) で API キーを取得（言い換え・共感メッセージに必要。未設定時はローカル処理のみ）
+### 1. リポジトリと Xcode
 
-2. **方法1: 環境変数で設定（推奨）**
-
-Xcodeのスキームに環境変数を追加：
-
-- Xcode で `Product` → `Scheme` → `Edit Scheme...` を選択
-- `Run` → `Arguments` → `Environment Variables` に以下を追加：
-  - Name: `GEMINI_API_KEY`
-  - Value: 取得したAPIキー
-
-**または**
-
-- `.xcodeproj` を右クリック → Show in Finder
-- ターミナルで以下を実行：
-```bash
-cd /path/to/GokigenNote
-export GEMINI_API_KEY="your-api-key-here"
-open GokigenNote.xcodeproj
-```
-
-3. **方法2: plistファイルで設定**
-
-`Gemini-Info.plist` を作成：
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>API_KEY</key>
-    <string>YOUR_GEMINI_API_KEY_HERE</string>
-</dict>
-</plist>
-```
-
-4. `.gitignore` にすでに追加済みなので、APIキーは安全です
-
-> **注意**: APIキーが未設定でも、ローカルの `EmpathyEngine` で動作します。
-> 
-> APIキーの読み込み優先順位:
-> 1. 環境変数 `GEMINI_API_KEY`
-> 2. `Gemini-Info.plist` ファイル
-
-## 🚀 ビルド＆実行
-
-### 必要な環境
-- Xcode 16.0+
-- iOS 18.0+ デバイスまたはシミュレーター
-
-### 手順
-
-1. **リポジトリをクローン**
 ```bash
 git clone <repository-url>
-cd GokigenNote
-```
-
-2. **Xcodeでプロジェクトを開く**
-```bash
+cd GokigenNote-1
 open GokigenNote.xcodeproj
 ```
 
-3. **Swift Package Manager の依存関係を解決**
-   - Xcode が自動的に `GoogleGenerativeAI` パッケージをダウンロード
+- **File → Packages → Resolve Package Versions** で SPM 解決（Firebase iOS SDK, Google Generative AI Swift）
 
-4. **ビルド＆実行**
-   - ⌘R または Product → Run
+### 2. Firebase
 
-## 📝 使い方
+- Firebase プロジェクトで iOS アプリを追加し、`GoogleService-Info.plist` を配置
+- Authentication（メール/パスワード、Google）と Firestore、Functions（`syncEntitlements`）を有効化
+- 詳細は `FIREBASE_SETUP.md` を参照
 
-1. **気分を選択** - 今の気分に近い絵文字をタップ
-2. **問いに答える** - 表示された問いに沿って、または自由に入力
-3. **例文を参考に** - 必要に応じて「例文を挿入」ボタンで気分に応じた例文を挿入
-4. **言い換えを確認** - 「言い換えをつくる」でやさしい表現に変換
-5. **記録する** - 「この一言を記録する」で保存
-6. **履歴を振り返る** - 「すべての記録を見る」から過去の記録を確認
-7. **傾向を確認** - 最下部のトレンドカードで自分の傾向を把握
+### 3. Gemini API（言い換え・共感）
 
-## 🎨 デザインコンセプト
+- [Google AI Studio](https://aistudio.google.com/apikey) で API キーを取得
+- Xcode の Run スキームの **Environment Variables** に `GEMINI_API_KEY` を設定  
+  または `Gemini-Info.plist` の `API_KEY` で設定（`.gitignore` 済み）
 
-- **ミニマル**: Apple標準デザインに準拠したクリーンなUI
-- **やさしさ**: ユーザーを責めない、前向きなトーン
-- **アクセシビリティ**: VoiceOver対応、Dynamic Type対応
-- **ダークモード**: 完全対応
+### 4. ビルド・実行
 
-## 🔒 プライバシー
+- 対象: **iOS**（シミュレータまたは実機）
+- ⌘R で実行。未ログインなら AuthView、ログイン後は MainTabView。
 
-- ログイン後は記録データがFirestoreクラウドに保存されます
-- 「言い換えをつくる」「共感メッセージ」等の利用時、入力テキストは **Google の AI（Gemini API）** に送信され、結果表示のためだけに利用されます（Google の[利用規約](https://ai.google.dev/terms)・[プライバシーポリシー](https://policies.google.com/privacy)に従います）
-- エクスポート機能で自分でバックアップ可能
+## 📝 使い方（今日の問い）
 
-## 🤝 コントリビューション
+1. ログイン後、「今日の問い」タブで場面・気分を選択
+2. 「話す」で音声入力、またはテキストで入力
+3. 「言い換えをつくる」でやさしい表現を生成（共通枠を1消費）
+4. 送る／もう一度調整／**記録する**で Firestore に保存（Draft はオートセーブ）
+5. 記録・カレンダー・トレーニング・設定は各タブから利用
 
-このプロジェクトは個人開発です。フィードバックや改善案は歓迎します。
+## 🔒 プライバシー・利用
 
-## 📄 ライセンス
+- ログイン後の記録は Firestore に保存されます
+- 言い換え・共感は **Google Gemini API** にテキストを送信します（[利用規約](https://ai.google.dev/terms)・[プライバシー](https://policies.google.com/privacy)に従います）
+- 課金状態は StoreKit と Firebase Functions でサーバと同期します
 
-このプロジェクトは教育目的で作成されました。
+## 📄 ライセンス・注意
+
+- 教育目的で作成されたプロジェクトです
+- メンタルヘルスの専門的サポートは提供しません。深刻な悩みは専門機関にご相談ください
 
 ## 👤 作成者
 
 丹内智弥 (Tomoya Tannai)
-
----
-
-**⚠️ 重要**: このアプリはメンタルヘルスの専門的なサポートを提供するものではありません。深刻な悩みがある場合は、専門機関にご相談ください。
-
