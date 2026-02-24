@@ -237,12 +237,12 @@ final class PremiumManager: ObservableObject {
     func loadProducts() async {
         do {
             let storeProducts = try await Product.products(for: Array(ProductID.all))
+            log.info("products=\(storeProducts.map { $0.id }.joined(separator: ","), privacy: .public)")
             self.availableProducts = storeProducts
-            log.info("loadProducts ok. count=\(storeProducts.count, privacy: .public)")
         } catch {
-            self.lastError = "商品取得エラー: \(error)"
-            self.availableProducts = []
+            self.lastError = "loadProducts failed: \(String(describing: error))"
             log.error("loadProducts failed: \(String(describing: error), privacy: .public)")
+            self.availableProducts = []
         }
     }
 
