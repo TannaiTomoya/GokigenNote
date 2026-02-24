@@ -167,23 +167,35 @@ private struct PaywallProductButtons: View {
         Task { await pm.restore() }
     }
 
+    /// 購入ボタンのラベル（商品名・価格・chevron）を共通化
+    private func purchaseButtonLabel(product: Product) -> some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(ProductID.displayName(for: product.id)).fontWeight(.semibold)
+                Text(product.displayPrice).font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer()
+            Image(systemName: "chevron.right").font(.caption)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    /// isFeatured で if/else 分岐し、各分岐で buttonStyle を指定（三項演算子禁止・型不一致回避）
+    @ViewBuilder
+    private func purchaseButton(_ product: Product, isFeatured: Bool) -> some View {
+        if isFeatured {
+            Button { Task { await pm.purchase(product) } } label: { purchaseButtonLabel(product: product) }
+                .buttonStyle(BorderedProminentButtonStyle())
+        } else {
+            Button { Task { await pm.purchase(product) } } label: { purchaseButtonLabel(product: product) }
+                .buttonStyle(BorderedButtonStyle())
+        }
+    }
+
     var body: some View {
         VStack(spacing: 12) {
             ForEach(orderedProducts, id: \.id) { product in
-                Button {
-                    buy(product)
-                } label: {
-                    HStack {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(ProductID.displayName(for: product.id)).fontWeight(.semibold)
-                            Text(product.displayPrice).font(.caption).foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                        Image(systemName: "chevron.right").font(.caption)
-                    }
-                    .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(product.id == featuredProductID ? BorderedProminentButtonStyle() : BorderedButtonStyle())
+                purchaseButton(product, isFeatured: product.id == featuredProductID)
             }
 
             if orderedProducts.isEmpty {
