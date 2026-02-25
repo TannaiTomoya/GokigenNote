@@ -20,6 +20,9 @@ final class Persistence: EntryCache {
     private func key(for userId: String) -> String { "entries_v1_\(userId)" }
     private func pendingKey(for userId: String) -> String { "pending_entry_ids_\(userId)" }
 
+    /// 起動時に読み込む最大件数（メモリキル防止の保険）
+    private static let maxEntriesLoadLimit = 200
+
     // MARK: - ユーザー別キャッシュ（EntryCache）
 
     func loadEntries(userId: String) -> [Entry] {
@@ -28,7 +31,7 @@ final class Persistence: EntryCache {
               let decoded = try? JSONDecoder().decode([Entry].self, from: data) else {
             return []
         }
-        return decoded
+        return Array(decoded.prefix(Self.maxEntriesLoadLimit))
     }
 
     func saveEntries(_ entries: [Entry], userId: String) {

@@ -131,6 +131,10 @@ final class GokigenViewModel: ObservableObject {
     private static let dailyAPICallLimit = 30
     /// 言い換えキャッシュの最大件数（Phase 1）
     private static let reformulationCacheMaxCount = 50
+    /// メモリに保持する entries の上限（無制限成長によるメモリキル防止）
+    private static let maxEntriesInMemory = 300
+    /// UserDefaults に保存する件数（起動時の読み込み負荷軽減）
+    private static let maxEntriesToCache = 200
 
     private var reformulationCache: [String: String] = [:]
     private var reformulationCacheOrder: [String] = []
@@ -302,9 +306,9 @@ final class GokigenViewModel: ObservableObject {
         guard currentUserId != userId else { return }
         currentUserId = userId
 
-        // ① ローカル先出し（即表示）
+        // ① ローカル先出し（即表示）。件数上限でメモリを抑える
         let cached = persistence.loadEntries(userId: userId)
-        self.entries = cached.sorted { $0.date > $1.date }
+        self.entries = trimEntriesToLimit(cached.sorted { $0.date > $1.date })
 
         // ② pending 再送（先に実行）
         flushPending()
@@ -386,7 +390,13 @@ final class GokigenViewModel: ObservableObject {
                 dict[r.id] = r
             }
         }
-        return dict.values.sorted { $0.date > $1.date }
+        let sorted = dict.values.sorted { $0.date > $1.date }
+        return Array(sorted.prefix(Self.maxEntriesInMemory))
+    }
+
+    /// 配列をメモリ上限件数に切り詰める（日付降順の先頭＝最新を残す）
+    private func trimEntriesToLimit(_ list: [Entry]) -> [Entry] {
+        Array(list.prefix(Self.maxEntriesInMemory))
     }
 
     /// Firestore 初回1ページ取得 → マージ → キャッシュ更新
@@ -407,7 +417,8 @@ final class GokigenViewModel: ObservableObject {
                     self.lastEntryDoc = result.lastDoc
                     self.canLoadMore = !result.entries.isEmpty && result.entries.count == 30 && result.lastDoc != nil
                     self.isSyncing = false
-                    self.persistence.saveEntries(self.entries, userId: userId)
+                    let toCache = Array(self.entries.prefix(Self.maxEntriesToCache))
+                    self.persistence.saveEntries(toCache, userId: userId)
                 }
                 await MainActor.run {
                     self.flushPending()
@@ -437,11 +448,13 @@ final class GokigenViewModel: ObservableObject {
                     startAfter: lastEntryDoc
                 )
                 await MainActor.run {
+                    let next: [Entry]
                     if lastEntryDoc == nil {
-                        self.entries = result.entries.sorted { $0.date > $1.date }
+                        next = result.entries.sorted { $0.date > $1.date }
                     } else {
-                        self.entries = (self.entries + result.entries).sorted { $0.date > $1.date }
+                        next = (self.entries + result.entries).sorted { $0.date > $1.date }
                     }
+                    self.entries = self.trimEntriesToLimit(next)
                     self.lastEntryDoc = result.lastDoc
                     self.canLoadMore = !result.entries.isEmpty && result.entries.count == 30 && result.lastDoc != nil
                     self.isLoadingEntries = false
