@@ -87,10 +87,11 @@ struct CalendarView: View {
     
     private var calendarGrid: some View {
         let days = generateDaysInMonth()
-        
-        return LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 7), spacing: 8) {
-            ForEach(days, id: \.self) { date in
-                if let date = date {
+        let columns = Array(repeating: GridItem(.flexible()), count: 7)
+
+        return LazyVGrid(columns: columns, spacing: 8) {
+            ForEach(Array(days.enumerated()), id: \.offset) { _, maybeDate in
+                if let date = maybeDate {
                     DayCell(
                         date: date,
                         isSelected: calendar.isDate(date, inSameDayAs: selectedDate),
