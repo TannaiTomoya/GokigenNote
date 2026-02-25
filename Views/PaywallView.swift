@@ -204,6 +204,22 @@ private struct PaywallProductButtons: View {
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
                     .padding(.vertical, 8)
+                // デバッグ：0件のとき原因切り分け用（Bundle ID / 依頼IDs / 結果件数 / エラー）
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Bundle ID: \(Bundle.main.bundleIdentifier ?? "nil")")
+                    Text("取得依頼IDs: \(ProductID.all.sorted().joined(separator: ", "))")
+                    Text("取得結果件数: \(pm.availableProducts.count)")
+                    if let err = pm.lastError {
+                        Text("lastError: \(err)")
+                            .foregroundStyle(.red)
+                            .lineLimit(5)
+                    }
+                }
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(8)
+                .background(Color(.tertiarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
             }
 
             Text("価格は各プランに表示のとおり（月額・年額・買い切り）")
