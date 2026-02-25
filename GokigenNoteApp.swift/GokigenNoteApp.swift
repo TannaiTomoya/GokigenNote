@@ -27,6 +27,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
 @main
 struct GokigenNoteApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+    @Environment(\.scenePhase) private var scenePhase
     @StateObject private var authVM = AuthViewModel()
     @ObservedObject private var paywall = PaywallCoordinator.shared
 
@@ -54,6 +55,11 @@ struct GokigenNoteApp: App {
             .onAppear {
                 print("🏁 [GokigenNoteApp] アプリ起動")
                 print("🏁 [GokigenNoteApp] isAuthenticated: \(authVM.isAuthenticated)")
+            }
+        }
+        .onChange(of: scenePhase) { newValue in
+            if newValue == .active {
+                Task { await PremiumManager.shared.refreshEntitlements(mode: .startupCautious) }
             }
         }
     }

@@ -231,6 +231,7 @@ private struct PaywallProductButtons: View {
             }
             .font(.subheadline)
             .padding(.top, 4)
+            .buttonStyle(pm.lastError != nil ? BorderedProminentButtonStyle() : BorderedButtonStyle())
 
             if let err = pm.lastError {
                 Text(err)

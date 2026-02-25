@@ -39,12 +39,13 @@ const Limits = {
 } as const;
 
 /**
- * ピン（必須）：Apple の中間 or ルート証明書の SHA256 を固定。
- * Sandbox で購入/復元 → JWS の x5c をログ → intermediate/root の fingerprint を1つ入れる。
- * 空のままだと「Certificate chain is not trusted (pin mismatch)」で全 JWS が弾かれる。
+ * ピン（必須）：Apple の中間 or ルート証明書の SHA256 を2本以上登録（ローテ対策）。
+ * 下の値はプレースホルダー。Sandbox で購入/復元 → Cloud Logs の "x5c sha256 =" で [1][2] を取得し、
+ * 必ず実データに差し替える。差し替えずデプロイすると全 JWS が弾かれる。本番リリース前は本番レシートでもログを取り追加すること。
  */
 const APPLE_CERT_PINNED_SHA256: Set<string> = new Set([
-  // 例: "ab12...（64桁）" — 手順: syncEntitlements 内で一時的に fps を logger.info して採用
+  "0000000000000000000000000000000000000000000000000000000000000001", // 要差し替え: ログ x5c sha256 [1] の64桁hex
+  "0000000000000000000000000000000000000000000000000000000000000002", // 要差し替え: ログ x5c sha256 [2] の64桁hex
 ]);
 
 /** 証明書ユーティリティ（x5c ピン留め用） */
@@ -85,6 +86,14 @@ function monthKeyJST(now = new Date()): string {
   return `${jst.getUTCFullYear()}-${pad2(jst.getUTCMonth() + 1)}`;
 }
 
+/** 秒（10桁）ならミリ秒に変換。effectiveUntil は常に ms で保存・比較する */
+function normalizeToMs(epoch: number): number {
+  if (epoch < 1_000_000_000_000) {
+    return epoch * 1000;
+  }
+  return epoch;
+}
+
 /**
  * Apple JWS(Transaction) の検証：署名検証 + x5c ピン留め（偽証明書で抜かれない）。
  * (A) JWS 署名が正しい (B) 署名鍵が Apple の証明書チェーン由来 → 両方満たすときだけ payload を返す。
@@ -123,6 +132,13 @@ async function verifyAppleTransactionJWS(jws: string): Promise<any> {
   return payload;
 }
 
+/** サブスクかどうか（期限チェック対象） */
+function isSubscription(productId: string): boolean {
+  return (
+    productId === ProductID.premiumMonthly || productId === ProductID.premiumYearly
+  );
+}
+
 /**
  * payload から plan を決める（優先: lifetime > yearly > monthly > free）
  * payload の形式は StoreKit2 Transaction の claim を想定
@@ -135,15 +151,28 @@ function resolvePlanFromOwnedProducts(owned: Set<string>): Plan {
 }
 
 /**
- * entitlements/current を読む（無ければ free）
+ * entitlements/current を読む（無ければ free）。effectiveUntil は常に ms で返す（読む側で正規化）。
  */
-async function getCurrentPlan(uid: string): Promise<{ plan: Plan }> {
+async function getCurrentPlan(
+  uid: string
+): Promise<{ plan: Plan; effectiveUntil: number | null }> {
   const ref = db.doc(`users/${uid}/entitlements/current`);
   const snap = await ref.get();
-  if (!snap.exists) return { plan: "free" };
+  if (!snap.exists) return { plan: "free", effectiveUntil: null };
   const data = snap.data() as any;
-  const plan = (data?.plan as Plan) ?? "free";
-  return { plan };
+  const rawUntil = data?.effectiveUntil;
+  // 無効値（null/""/0/NaN）は期限なしにしない。subscription は consumeRewrite で null なら free に倒す。
+  let effectiveUntil: number | null = null;
+  if (rawUntil != null && rawUntil !== undefined && rawUntil !== "") {
+    const n = Number(rawUntil);
+    if (n !== 0 && Number.isFinite(n)) {
+      effectiveUntil = normalizeToMs(n);
+    }
+  }
+  return {
+    plan: (data?.plan as Plan) ?? "free",
+    effectiveUntil,
+  };
 }
 
 /**
@@ -160,14 +189,18 @@ export const syncEntitlements = onCall(
     if (!Array.isArray(transactions) || transactions.length === 0) {
       throw new HttpsError("invalid-argument", "transactions[] is required.");
     }
+    logger.info("syncEntitlements", {
+      uid,
+      transactionsCount: transactions.length,
+    });
 
-    // 署名検証済みのトランザクションから productId を集める
-    const owned = new Set<string>();
-    let effectiveUntil: number | null = null;
+    // accepted: revocation なし & productId あり。有効期限は per-product で保持。
+    const acceptedExpiry = new Map<string, number | null>(); // productId -> effectiveUntilMs (null = lifetime)
+    let verifiedJwsCount = 0;
 
     for (const jws of transactions) {
       try {
-        // ピン値取得用（一時ON → deploy → Sandboxで課金/復元 → Logsで fps 取得 → [1] or [2] を APPLE_CERT_PINNED_SHA256 にセット → このブロックをコメントアウトして再deploy）
+        // ピン値取得用（pin確定用ログ。運用では別ログで見る）
         const header = decodeProtectedHeader(jws);
         const x5c = (header as any).x5c as string[] | undefined;
         if (x5c?.length) {
@@ -177,8 +210,8 @@ export const syncEntitlements = onCall(
         }
 
         const payload = await verifyAppleTransactionJWS(jws);
+        verifiedJwsCount += 1;
 
-        // StoreKit2 Transaction claim（例）
         const productId = payload?.productId ?? payload?.productID;
         const revocationDate = payload?.revocationDate;
         const expiresDate = payload?.expiresDate;
@@ -186,37 +219,109 @@ export const syncEntitlements = onCall(
         if (!productId) continue;
         if (revocationDate) continue;
 
-        owned.add(String(productId));
-
-        // expiresDate は ms or sec の場合がある。あなたの実装方針で統一して扱う
-        if (expiresDate) {
-          const expNum = Number(expiresDate);
-          if (!Number.isNaN(expNum)) {
-            if (!effectiveUntil || expNum > effectiveUntil) effectiveUntil = expNum;
+        const pid = String(productId);
+        if (pid === ProductID.lifetime) {
+          acceptedExpiry.set(pid, null);
+        } else if (isSubscription(pid) && expiresDate != null) {
+          const n = normalizeToMs(Number(expiresDate));
+          if (Number.isFinite(n)) {
+            const cur = acceptedExpiry.get(pid);
+            const prev = cur !== undefined && cur !== null ? cur : n;
+            acceptedExpiry.set(pid, Math.max(prev, n));
+          } else {
+            acceptedExpiry.set(pid, acceptedExpiry.get(pid) ?? null);
           }
+        } else {
+          acceptedExpiry.set(pid, acceptedExpiry.get(pid) ?? null);
         }
       } catch (e: any) {
-        // 検証失敗は無視（安全側）
         logger.warn("syncEntitlements: verify failed for one transaction", e?.message ?? e);
         continue;
       }
     }
 
-    const plan = resolvePlanFromOwnedProducts(owned);
+    const nowMs = Date.now();
+    const activeProductIds = new Set<string>();
+    let effectiveUntilMs: number | null = null;
+    for (const [pid, until] of acceptedExpiry) {
+      if (until === null) {
+        activeProductIds.add(pid);
+      } else {
+        if (until > nowMs) {
+          activeProductIds.add(pid);
+          if (effectiveUntilMs === null || until > effectiveUntilMs) {
+            effectiveUntilMs = until;
+          }
+        }
+      }
+    }
 
+    const acceptedCount = acceptedExpiry.size;
+    const activeCount = activeProductIds.size;
+    const activeProductIDs = Array.from(activeProductIds);
     const ref = db.doc(`users/${uid}/entitlements/current`);
+
+    // 運用用ログ（件数＋先頭数件で短く）
+    const logPayload = {
+      uid,
+      transactionsCount: transactions.length,
+      verifiedJwsCount,
+      acceptedCount,
+      activeCount,
+      plan: activeCount > 0 ? resolvePlanFromOwnedProducts(activeProductIds) : "free",
+      effectiveUntilMs: effectiveUntilMs ?? undefined,
+      ownedCount: activeProductIDs.length,
+      ownedSample: activeProductIDs.slice(0, 3),
+    };
+
+    // 署名検証が1件も通っていない → 更新しない（pin/認証/通信の問題）
+    if (verifiedJwsCount === 0) {
+      logger.warn("syncEntitlements: no verified JWS, skipping update", {
+        ...logPayload,
+        reason: "no_verified_jws",
+      });
+      return { ok: false };
+    }
+
+    // 検証は通ったが現在有効な権利が0件（解約/返金/期限切れのみ）→ free に更新
+    if (activeCount === 0) {
+      await ref.set(
+        {
+          plan: "free",
+          ownedProductIDs: [],
+          effectiveUntil: null,
+          updatedAt: FieldValue.serverTimestamp(),
+          source: "storekit2_jws",
+          lastSyncReason: "no_accepted_products",
+        },
+        { merge: true }
+      );
+      logger.info("syncEntitlements: updated to free", {
+        ...logPayload,
+        reason: "no_accepted_products",
+      });
+      return { ok: true, plan: "free", effectiveUntil: null, ownedProductIDs: [] };
+    }
+
+    const plan = resolvePlanFromOwnedProducts(activeProductIds);
     await ref.set(
       {
         plan,
-        ownedProductIDs: Array.from(owned),
-        effectiveUntil,
+        ownedProductIDs: activeProductIDs,
+        effectiveUntil: effectiveUntilMs,
         updatedAt: FieldValue.serverTimestamp(),
         source: "storekit2_jws",
       },
       { merge: true }
     );
 
-    return { ok: true, plan, effectiveUntil };
+    logger.info("syncEntitlements: updated", {
+      ...logPayload,
+      plan,
+      effectiveUntilMs: effectiveUntilMs ?? undefined,
+      reason: "ok",
+    });
+    return { ok: true, plan, effectiveUntil: effectiveUntilMs, ownedProductIDs: activeProductIDs };
   }
 );
 
@@ -236,23 +341,42 @@ export const consumeRewrite = onCall(
       throw new HttpsError("invalid-argument", "op must be 'reformulate' or 'empathy'.");
     }
 
-    const { plan } = await getCurrentPlan(uid);
+    const { plan, effectiveUntil } = await getCurrentPlan(uid);
 
-    // 無制限
+    // サブスクは「状態」で判定。期限切れ or 無効な effectiveUntil なら free に落とす
+    let actualPlan: Plan = plan;
+    let subscriptionDenyReason: string | null = null;
     if (plan === "subscription_monthly" || plan === "subscription_yearly") {
+      if (effectiveUntil == null || effectiveUntil === 0) {
+        actualPlan = "free";
+        subscriptionDenyReason = "missing_until";
+      } else {
+        const nowMs = Date.now();
+        if (effectiveUntil < nowMs) {
+          actualPlan = "free";
+        }
+      }
+    }
+
+    // 無制限（有効なサブスクのみ）
+    if (
+      actualPlan === "subscription_monthly" ||
+      actualPlan === "subscription_yearly"
+    ) {
       return {
         allowed: true,
-        plan,
+        plan: actualPlan,
         limit: null,
         used: null,
         remaining: null,
         resetKey: null,
+        reason: "active_subscription",
       };
     }
 
     const now = new Date();
 
-    if (plan === "free") {
+    if (actualPlan === "free") {
       const key = dayKeyJST(now);
       const ref = db.doc(`users/${uid}/usageDaily/${key}`);
 
@@ -263,7 +387,7 @@ export const consumeRewrite = onCall(
         if (used >= Limits.freeDaily) {
           return {
             allowed: false,
-            plan,
+            plan: actualPlan,
             limit: Limits.freeDaily,
             used,
             remaining: 0,
@@ -284,11 +408,12 @@ export const consumeRewrite = onCall(
 
         return {
           allowed: true,
-          plan,
+          plan: actualPlan,
           limit: Limits.freeDaily,
           used: used + 1,
           remaining: Math.max(0, Limits.freeDaily - (used + 1)),
           resetKey: key,
+          reason: subscriptionDenyReason ?? "free_daily",
         };
       });
 
@@ -296,7 +421,7 @@ export const consumeRewrite = onCall(
     }
 
     // lifetime（月次制限）
-    if (plan === "lifetime") {
+    if (actualPlan === "lifetime") {
       const key = monthKeyJST(now);
       const ref = db.doc(`users/${uid}/usageMonthly/${key}`);
 
@@ -307,7 +432,7 @@ export const consumeRewrite = onCall(
         if (used >= Limits.lifetimeMonthly) {
           return {
             allowed: false,
-            plan,
+            plan: actualPlan,
             limit: Limits.lifetimeMonthly,
             used,
             remaining: 0,
@@ -328,7 +453,7 @@ export const consumeRewrite = onCall(
 
         return {
           allowed: true,
-          plan,
+          plan: actualPlan,
           limit: Limits.lifetimeMonthly,
           used: used + 1,
           remaining: Math.max(0, Limits.lifetimeMonthly - (used + 1)),

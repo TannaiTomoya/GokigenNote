@@ -36,6 +36,17 @@ extension Plan {
         }
     }
 
+    /// サーバー（syncEntitlements）の plan 文字列から変換。サーバーを正とするときに使用。
+    static func from(serverValue: String) -> Plan? {
+        switch serverValue {
+        case "free": return .free
+        case "lifetime": return .lifetime
+        case "subscription_monthly": return .subscription(.monthly)
+        case "subscription_yearly": return .subscription(.yearly)
+        default: return nil
+        }
+    }
+
     var cacheValue: String {
         switch self {
         case .free: return "free"
@@ -179,6 +190,14 @@ final class PremiumManager: ObservableObject {
         "PremiumManager.lastPlan.\(currentUserId ?? "guest")"
     }
 
+    /// サーバー sync 成功時の状態。通信失敗時はこれで表示を維持（premium→free の誤り防止）
+    private var lastKnownServerPlanKey: String {
+        "PremiumManager.lastKnownServerPlan.\(currentUserId ?? "guest")"
+    }
+    private var lastKnownServerOwnedKey: String {
+        "PremiumManager.lastKnownServerOwned.\(currentUserId ?? "guest")"
+    }
+
     private init() {}
 
     /// 認証状態に応じて呼び出す（ログイン/ログアウト時）。キャッシュをユーザー単位で切り替え、ログアウト時は状態をリセット
@@ -195,8 +214,25 @@ final class PremiumManager: ObservableObject {
                 plan = .free
                 entitlementsLoaded = false
             }
+            // 一時: syncEntitlements が呼ばれているか Firebase ログで確認するため1回だけダミー呼び出し
+            Task { await Self.debugCallSyncEntitlementsOnce() }
         } else {
             resetForLogout()
+        }
+    }
+
+    /// 事実確認用: asia-northeast1 の syncEntitlements に届いているか。1回だけ実行。dummy は検証で落ちるが関数ログは出る。
+    private static var didRunSyncEntitlementsDebug = false
+    private static func debugCallSyncEntitlementsOnce() async {
+        guard !didRunSyncEntitlementsDebug else { return }
+        didRunSyncEntitlementsDebug = true
+        let functions = Functions.functions(region: "asia-northeast1")
+        let callable = functions.httpsCallable("syncEntitlements")
+        do {
+            let result = try await callable.call(["transactions": ["dummy"]])
+            print("[syncEntitlements debug] result:", result.data ?? "nil")
+        } catch {
+            print("[syncEntitlements debug] error:", error)
         }
     }
 
@@ -227,6 +263,7 @@ final class PremiumManager: ObservableObject {
 
         Task {
             await loadProducts()
+            // 起動時に必ず refresh。JWS があればサーバー sync し、サーバー結果で plan を上書き（サーバーを正とする）
             await refreshEntitlements(mode: .startupCautious)
         }
     }
@@ -350,17 +387,19 @@ final class PremiumManager: ObservableObject {
             log.debug("refreshEntitlements start mode=\(String(describing: mode), privacy: .public) cached=\(cached.cacheValue, privacy: .public) current=\(self.plan.cacheValue, privacy: .public) products=\(self.availableProducts.count, privacy: .public) loaded=\(self.entitlementsLoaded, privacy: .public)")
 
             var newOwned: Set<String> = []
-            // P1A: server sync payload (disabled until we decide the signed data format; StoreKit2 Transaction has no jwsRepresentation)
-            // var signedPayloads: [String] = []
+            var jwsList: [String] = []
             var verifyFailedCount = 0
 
             for await result in StoreKit.Transaction.currentEntitlements {
+                let jws = result.jwsRepresentation
                 do {
                     let t: StoreKit.Transaction = try Self.verifyTransaction(result)
                     if t.revocationDate != nil { continue }
                     if let exp = t.expirationDate, exp <= now { continue }
                     newOwned.insert(t.productID)
-                    // signedPayloads.append(...) // TODO: decide payload format (signedData etc.)
+                    if let jws = jws {
+                        jwsList.append(jws)
+                    }
                 } catch {
                     verifyFailedCount += 1
                     log.error("verify failed in currentEntitlements: \(error.localizedDescription, privacy: .public)")
@@ -368,8 +407,40 @@ final class PremiumManager: ObservableObject {
                 }
             }
 
-            // P1A: サーバ同期は P0 では無効化。課金は StoreKit2 currentEntitlements/updates で担保。P1B で復活予定。
-            // await syncEntitlementsToServer(transactions: signedPayloads)
+            log.info("JWS count: \(jwsList.count, privacy: .public)", privacy: .public)
+
+            // サーバーを正とする：JWS があれば sync し、成功時はサーバー結果でローカルを上書き
+            if !jwsList.isEmpty {
+                let didApplyServer = await syncEntitlementsToServer(transactions: jwsList)
+                if didApplyServer {
+                    entitlementsLoaded = true
+                    log.info("PLAN: \(self.plan.cacheValue, privacy: .public) OWNED: \(Array(self.ownedProductIDs).sorted().joined(separator: ","), privacy: .public) MODE: server_applied")
+                    if pendingEntitlementsRefresh {
+                        log.debug("pendingEntitlementsRefresh -> rerun once")
+                        continue
+                    }
+                    break
+                }
+            } else {
+                log.info("JWS count: 0 reason: server_sync_skipped (no jwsRepresentation or no entitlements)", privacy: .public)
+            }
+
+            // サーバー未適用時：最後に成功したサーバー状態を使う（通信失敗で premium→free にならないように）
+            if let lastPlanRaw = UserDefaults.standard.string(forKey: lastKnownServerPlanKey),
+               let lastPlan = Plan.from(cacheValue: lastPlanRaw) {
+                let lastOwnedRaw = UserDefaults.standard.string(forKey: lastKnownServerOwnedKey) ?? ""
+                let lastOwned = lastOwnedRaw.isEmpty ? Set<String>() : Set(lastOwnedRaw.split(separator: ",").map { String($0) })
+                plan = lastPlan
+                ownedProductIDs = lastOwned
+                UserDefaults.standard.set(lastPlan.cacheValue, forKey: planCacheKey)
+                entitlementsLoaded = true
+                log.info("PLAN: \(self.plan.cacheValue, privacy: .public) OWNED: lastKnownServer fallback count=\(lastOwned.count, privacy: .public)")
+                if pendingEntitlementsRefresh {
+                    log.debug("pendingEntitlementsRefresh -> rerun once")
+                    continue
+                }
+                break
+            }
 
             let entitlementsLooksHealthy =
                 verifyFailedCount == 0 &&
@@ -415,19 +486,34 @@ final class PremiumManager: ObservableObject {
     }
 
     /// P1A: Functions syncEntitlements に JWS を送り、サーバで署名検証・entitlements/current に保存。
-    /// 未ログイン時は unauthenticated で失敗するだけ（ローカル plan は refreshEntitlements で更新済み）。
-    private func syncEntitlementsToServer(transactions: [String]) async {
-        guard !transactions.isEmpty else { return }
+    /// サーバーを正とする：ok: true のときサーバーの plan / ownedProductIDs でローカルを上書きする。
+    /// - Returns: サーバー結果をローカルに適用したか（ok: true かつ plan パース成功時 true）
+    private func syncEntitlementsToServer(transactions: [String]) async -> Bool {
+        guard !transactions.isEmpty else { return false }
         let functions = Functions.functions(region: "asia-northeast1")
         let callable = functions.httpsCallable("syncEntitlements")
         do {
             let result = try await callable.call(["transactions": transactions])
-            if let data = result.data as? [String: Any], (data["ok"] as? Bool) == true {
-                log.info("syncEntitlements ok plan=\(data["plan"] as? String ?? "?", privacy: .public)")
+            guard let data = result.data as? [String: Any], (data["ok"] as? Bool) == true else {
+                await MainActor.run { lastError = "プレミアム反映に失敗しました。復元をお試しください。" }
+                return false
             }
+            await MainActor.run { lastError = nil }
+            guard let planStr = data["plan"] as? String, let serverPlan = Plan.from(serverValue: planStr) else {
+                log.info("syncEntitlements ok but plan parse failed: \(data["plan"] as? String ?? "?", privacy: .public)")
+                return false
+            }
+            let serverOwned = (data["ownedProductIDs"] as? [String]).map { Set($0) } ?? []
+            plan = serverPlan
+            ownedProductIDs = serverOwned
+            UserDefaults.standard.set(serverPlan.cacheValue, forKey: planCacheKey)
+            UserDefaults.standard.set(serverPlan.cacheValue, forKey: lastKnownServerPlanKey)
+            UserDefaults.standard.set(Array(serverOwned).sorted().joined(separator: ","), forKey: lastKnownServerOwnedKey)
+            log.info("syncEntitlements applied server plan=\(serverPlan.cacheValue, privacy: .public) owned=\(serverOwned.count, privacy: .public)")
+            return true
         } catch {
-            // 未ログインやネット障害時は無視（ローカル plan はそのまま）
             log.debug("syncEntitlements failed: \(error.localizedDescription, privacy: .public)")
+            return false
         }
     }
 
