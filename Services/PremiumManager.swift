@@ -230,7 +230,7 @@ final class PremiumManager: ObservableObject {
         let callable = functions.httpsCallable("syncEntitlements")
         do {
             let result = try await callable.call(["transactions": ["dummy"]])
-            print("[syncEntitlements debug] result:", result.data ?? "nil")
+            print("[syncEntitlements debug] result:", String(describing: result.data))
         } catch {
             print("[syncEntitlements debug] error:", error)
         }
@@ -391,15 +391,12 @@ final class PremiumManager: ObservableObject {
             var verifyFailedCount = 0
 
             for await result in StoreKit.Transaction.currentEntitlements {
-                let jws = result.jwsRepresentation
                 do {
                     let t: StoreKit.Transaction = try Self.verifyTransaction(result)
                     if t.revocationDate != nil { continue }
                     if let exp = t.expirationDate, exp <= now { continue }
                     newOwned.insert(t.productID)
-                    if let jws = jws {
-                        jwsList.append(jws)
-                    }
+                    jwsList.append(result.jwsRepresentation)
                 } catch {
                     verifyFailedCount += 1
                     log.error("verify failed in currentEntitlements: \(error.localizedDescription, privacy: .public)")
@@ -407,7 +404,7 @@ final class PremiumManager: ObservableObject {
                 }
             }
 
-            log.info("JWS count: \(jwsList.count, privacy: .public)", privacy: .public)
+            log.info("JWS count: \(jwsList.count, privacy: .public)")
 
             // サーバーを正とする：JWS があれば sync し、成功時はサーバー結果でローカルを上書き
             if !jwsList.isEmpty {
@@ -422,7 +419,7 @@ final class PremiumManager: ObservableObject {
                     break
                 }
             } else {
-                log.info("JWS count: 0 reason: server_sync_skipped (no jwsRepresentation or no entitlements)", privacy: .public)
+                log.info("JWS count: 0 reason: server_sync_skipped (no jwsRepresentation or no entitlements)")
             }
 
             // サーバー未適用時：最後に成功したサーバー状態を使う（通信失敗で premium→free にならないように）
@@ -503,7 +500,7 @@ final class PremiumManager: ObservableObject {
                 log.info("syncEntitlements ok but plan parse failed: \(data["plan"] as? String ?? "?", privacy: .public)")
                 return false
             }
-            let serverOwned = (data["ownedProductIDs"] as? [String]).map { Set($0) } ?? []
+            let serverOwned = Set((data["ownedProductIDs"] as? [String]) ?? [])
             plan = serverPlan
             ownedProductIDs = serverOwned
             UserDefaults.standard.set(serverPlan.cacheValue, forKey: planCacheKey)

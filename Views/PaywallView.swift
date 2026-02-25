@@ -226,12 +226,21 @@ private struct PaywallProductButtons: View {
                 .font(.caption2)
                 .foregroundStyle(.secondary)
 
-            Button("購入を復元") {
-                doRestore()
+            if pm.lastError != nil {
+                Button("購入を復元") {
+                    doRestore()
+                }
+                .font(.subheadline)
+                .padding(.top, 4)
+                .buttonStyle(BorderedProminentButtonStyle())
+            } else {
+                Button("購入を復元") {
+                    doRestore()
+                }
+                .font(.subheadline)
+                .padding(.top, 4)
+                .buttonStyle(BorderedButtonStyle())
             }
-            .font(.subheadline)
-            .padding(.top, 4)
-            .buttonStyle(pm.lastError != nil ? BorderedProminentButtonStyle() : BorderedButtonStyle())
 
             if let err = pm.lastError {
                 Text(err)
