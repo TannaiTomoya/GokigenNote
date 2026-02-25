@@ -8,15 +8,29 @@
 import SwiftUI
 import FirebaseCore
 
+#if canImport(UIKit)
+import UIKit
+#endif
+
+final class AppDelegate: NSObject, UIApplicationDelegate {
+    func application(
+        _ application: UIApplication,
+        didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
+    ) -> Bool {
+        if FirebaseApp.app() == nil {
+            FirebaseApp.configure()
+        }
+        return true
+    }
+}
+
 @main
 struct GokigenNoteApp: App {
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var authVM = AuthViewModel()
     @ObservedObject private var paywall = PaywallCoordinator.shared
 
     init() {
-        if FirebaseApp.app() == nil {
-            FirebaseApp.configure()
-        }
         PremiumManager.shared.start()
     }
     
