@@ -97,6 +97,7 @@
 			buildPhases = (
 				A86405082ECCE879005DD4B1 /* Sources */,
 				A86405092ECCE879005DD4B1 /* Frameworks */,
+				A808D9B02F4723F300D9922F /* Ensure Gemini-Info.plist */,
 				A864050A2ECCE879005DD4B1 /* Resources */,
 			);
 			buildRules = (
@@ -159,6 +160,27 @@
 			);
 		};
 /* End PBXProject section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		A808D9B02F4723F300D9922F /* Ensure Gemini-Info.plist */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Ensure Gemini-Info.plist";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "if [ ! -f \"${SRCROOT}/Gemini-Info.plist\" ]; then\n  cp \"${SRCROOT}/Gemini-Info.plist.example\" \"${SRCROOT}/Gemini-Info.plist\"\n  echo \"Created Gemini-Info.plist from example. Replace API_KEY with your key.\"\nfi\n";
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXResourcesBuildPhase section */
 		A864050A2ECCE879005DD4B1 /* Resources */ = {
