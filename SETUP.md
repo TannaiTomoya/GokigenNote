@@ -31,6 +31,25 @@ open GokigenNote.xcodeproj
 
 ---
 
+## 🔥 Firebase（GoogleService-Info.plist）の設定（必須）
+
+ビルドを通すには **GoogleService-Info.plist** をプロジェクトルートに置く必要があります。APIキー等を漏らさないため、**Firebase Console から取得したファイルをそのまま配置する**方法を推奨します。
+
+### 推奨手順
+
+1. [Firebase Console](https://console.firebase.google.com/) でプロジェクトを開く
+2. **プロジェクトの設定**（歯車アイコン）→ **全般** → **マイアプリ** で iOS アプリを選択（なければ追加）
+3. **GoogleService-Info.plist** をダウンロード
+4. ダウンロードしたファイルを **プロジェクトルート** に配置（ファイル名は `GoogleService-Info.plist` のまま）
+5. Xcode で **Product → Clean Build Folder** のあとビルド
+
+> **⚠️ セキュリティ**
+> - `GoogleService-Info.plist` は `.gitignore` に含まれており、コミット・push されません
+> - 本番のキーが入ったファイルをリポジトリに含めないでください
+> - 他の開発者や CI では、各自が Firebase Console から取得して同じ場所に配置してください
+
+---
+
 ## 🔧 Gemini API の設定（オプション）
 
 アプリは Gemini API なしでも動作しますが、より高度な言い換え機能を使いたい場合は以下の手順で設定してください。
@@ -121,6 +140,12 @@ cp Gemini-Info.plist.example Gemini-Info.plist
 ---
 
 ## 🐛 トラブルシューティング
+
+### ビルドエラー: "Build input file cannot be found: .../GoogleService-Info.plist"
+
+**原因**: `GoogleService-Info.plist` がプロジェクトルートにない（.gitignore のため clone 後は存在しない）。
+
+**解決方法**: 上記「Firebase（GoogleService-Info.plist）の設定」に従い、Firebase Console からダウンロードしたファイルをプロジェクトルートに配置してください。
 
 ### ビルドエラー: "No such module 'GoogleGenerativeAI'"
 
