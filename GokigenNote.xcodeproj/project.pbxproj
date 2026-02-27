@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		A808D9B42F4723F500D9922F /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A808D9B32F4723F500D9922F /* Assets.xcassets */; };
 		A808D9B22F4723F400D9922F /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = A808D9B12F4723F400D9922F /* GoogleService-Info.plist */; };
 		A86406162ED02F1D005DD4B1 /* GoogleGenerativeAI in Frameworks */ = {isa = PBXBuildFile; productRef = A86406152ED02F1D005DD4B1 /* GoogleGenerativeAI */; };
 		A86407D62ED1AD02005DD4B1 /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = A86407D52ED1AD02005DD4B1 /* FirebaseAuth */; };
@@ -18,6 +19,7 @@
 /* Begin PBXFileReference section */
 		A808D9AD2F4723F300D9922F /* Gemini-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = "Gemini-Info.plist"; sourceTree = "<group>"; };
 		A808D9B12F4723F400D9922F /* GoogleService-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "GoogleService-Info.plist"; sourceTree = "<group>"; };
+		A808D9B32F4723F500D9922F /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A864050C2ECCE879005DD4B1 /* GokigenNote.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = GokigenNote.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A86407E12ED1BF73005DD4B1 /* GokigenNote-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = "GokigenNote-Info.plist"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -69,6 +71,7 @@
 		A86405032ECCE878005DD4B1 = {
 			isa = PBXGroup;
 			children = (
+				A808D9B32F4723F500D9922F /* Assets.xcassets */,
 				A808D9AD2F4723F300D9922F /* Gemini-Info.plist */,
 				A808D9B12F4723F400D9922F /* GoogleService-Info.plist */,
 				A86407E12ED1BF73005DD4B1 /* GokigenNote-Info.plist */,
@@ -188,6 +191,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A808D9B42F4723F500D9922F /* Assets.xcassets in Resources */,
 				A808D9B22F4723F400D9922F /* GoogleService-Info.plist in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
