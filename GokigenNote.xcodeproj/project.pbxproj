@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		A808D9B22F4723F400D9922F /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = A808D9B12F4723F400D9922F /* GoogleService-Info.plist */; };
 		A86406162ED02F1D005DD4B1 /* GoogleGenerativeAI in Frameworks */ = {isa = PBXBuildFile; productRef = A86406152ED02F1D005DD4B1 /* GoogleGenerativeAI */; };
 		A86407D62ED1AD02005DD4B1 /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = A86407D52ED1AD02005DD4B1 /* FirebaseAuth */; };
 		A86407DE2ED1BA41005DD4B1 /* FirebaseCore in Frameworks */ = {isa = PBXBuildFile; productRef = A86407DD2ED1BA41005DD4B1 /* FirebaseCore */; };
@@ -16,6 +17,7 @@
 
 /* Begin PBXFileReference section */
 		A808D9AD2F4723F300D9922F /* Gemini-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = "Gemini-Info.plist"; sourceTree = "<group>"; };
+		A808D9B12F4723F400D9922F /* GoogleService-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "GoogleService-Info.plist"; sourceTree = "<group>"; };
 		A864050C2ECCE879005DD4B1 /* GokigenNote.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = GokigenNote.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A86407E12ED1BF73005DD4B1 /* GokigenNote-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = "GokigenNote-Info.plist"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -68,6 +70,7 @@
 			isa = PBXGroup;
 			children = (
 				A808D9AD2F4723F300D9922F /* Gemini-Info.plist */,
+				A808D9B12F4723F400D9922F /* GoogleService-Info.plist */,
 				A86407E12ED1BF73005DD4B1 /* GokigenNote-Info.plist */,
 				A864050E2ECCE879005DD4B1 /* GokigenNoteApp.swift */,
 				A864051A2ECCF1C0005DD4B1 /* Models */,
@@ -185,6 +188,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A808D9B22F4723F400D9922F /* GoogleService-Info.plist in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
