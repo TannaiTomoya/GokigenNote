@@ -17,8 +17,8 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		A864050C2ECCE879005DD4B1 /* GokigenNote.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = GokigenNote.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A808D9AD2F4723F300D9922F /* Gemini-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = "Gemini-Info.plist"; sourceTree = "<group>"; };
+		A864050C2ECCE879005DD4B1 /* GokigenNote.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = GokigenNote.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A86407E12ED1BF73005DD4B1 /* GokigenNote-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = "GokigenNote-Info.plist"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 

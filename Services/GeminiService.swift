@@ -5,9 +5,21 @@
 //  Created by 丹内智弥 on 2025/11/20.
 //
 
+import CryptoKit
 import Foundation
 import os
 @preconcurrency import GoogleGenerativeAI
+
+/// 同一入力のキャッシュキー（改行正規化してハッシュ）
+private func makeLineStopperCacheKey(_ text: String) -> String {
+    let normalized = text
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+        .replacingOccurrences(of: "\r\n", with: "\n")
+        .replacingOccurrences(of: "\r", with: "\n")
+    let data = Data(normalized.utf8)
+    let digest = SHA256.hash(data: data)
+    return digest.compactMap { String(format: "%02x", $0) }.joined()
+}
 
 enum TimeoutError: Error {
     case timedOut(Double)
@@ -65,6 +77,8 @@ final class GeminiService {
     static let shared = GeminiService()
     private let client: GeminiClient?
     private let logger = Logger(subsystem: "GokigenNote", category: "GeminiService")
+    private let lineStopperLimiter = RateLimiter(minInterval: 1.2)
+    private let lineStopperCache = LineStopperCache(ttl: 60 * 10) // 10分
 
     init() {
         if let apiKey = APIKey.gemini, !apiKey.isEmpty {
@@ -214,8 +228,27 @@ final class GeminiService {
         }
     }
 
-    /// 地雷LINEストッパー: 危険度 + 改善案3つを JSON で返す（壊れにくいプロンプト・抽出・1回リトライ）
+    /// 地雷LINEストッパー: キャッシュ → レート制限（補助輪）→ Functions lineStopper 呼び出し（キー・RPM はサーバ）
     func generateLineStopperResult(text: String) async throws -> (riskRaw: String, oneLiner: String, suggestions: [(label: String, text: String)]) {
+        let key = makeLineStopperCacheKey(text)
+        if let cached = await lineStopperCache.get(key) {
+            return cached.value
+        }
+
+        await lineStopperLimiter.acquire()
+        do {
+            let result = try await LineStopperRemoteService.shared.check(text: text)
+            await lineStopperCache.set(key, .init(value: result, createdAt: Date()))
+            await lineStopperLimiter.release()
+            return result
+        } catch {
+            await lineStopperLimiter.release()
+            throw error
+        }
+    }
+
+    /// 既存ロジック: 危険度 + 改善案3つを JSON で返す（壊れにくいプロンプト・抽出・1回リトライ）
+    private func generateLineStopperResult_core(text: String) async throws -> (riskRaw: String, oneLiner: String, suggestions: [(label: String, text: String)]) {
         guard let client else { throw GeminiError.apiKeyNotAvailable }
 
         let normalizedInput = normalizeLineStopperInput(text)

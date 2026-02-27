@@ -16,7 +16,7 @@ struct MainTabView: View {
     var body: some View {
         TabView {
             // 地雷LINEストッパー
-            LineStopperRootView()
+            LineStopperRootView(authVM: authVM)
                 .tabItem {
                     Label("地雷LINE", systemImage: "bubble.left.and.bubble.right")
                 }
@@ -54,27 +54,24 @@ struct MainTabView: View {
         .onAppear {
             vm.authViewModel = authVM
         }
-        .task(id: "\(authVM.authReady)_\(authVM.uid ?? "")") {
-            guard authVM.authReady, let uid = authVM.uid else {
-                if !authVM.authReady { print("⚠️ authReady=false. skip setUserId") }
-                else { print("⚠️ uid is nil. skip setUserId") }
+        .task(id: authVM.uid ?? "nil") {
+            guard let uid = authVM.uid else {
+                vm.clearUserId()
+                trainingVM.clearUserId()
                 return
             }
             print("✅ setUserId:", uid)
             vm.authViewModel = authVM
             vm.setUserId(uid)
             trainingVM.setUserId(uid)
-            PremiumManager.shared.setCurrentUserId(uid)
         }
         .onChange(of: authVM.uid) { _, newUID in
-            if authVM.authReady, let uid = newUID {
+            if let uid = newUID {
                 vm.setUserId(uid)
                 trainingVM.setUserId(uid)
-                PremiumManager.shared.setCurrentUserId(uid)
             } else {
                 vm.clearUserId()
                 trainingVM.clearUserId()
-                PremiumManager.shared.setCurrentUserId(nil)
             }
         }
         .onChange(of: network.isOnline) { _, isOnline in

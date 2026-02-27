@@ -81,28 +81,7 @@ final class LineStopperViewModel: ObservableObject {
         isLoading = true
         defer { isLoading = false }
 
-        // 1) QuotaService でサーバ側ゲート
-        let quotaResult: QuotaCheckResult
-        do {
-            quotaResult = try await QuotaService.shared.consumeRewrite(op: .reformulate, draftEntryId: nil)
-        } catch {
-            if QuotaService.isUnauthenticated(error) {
-                errorMessage = "ログインが必要です。"
-            } else {
-                errorMessage = error.localizedDescription
-            }
-            return
-        }
-
-        if !quotaResult.allowed {
-            shouldShowPaywall = true
-            if quotaResult.paywall {
-                PaywallCoordinator.shared.present()
-            }
-            return
-        }
-
-        // 2) Gemini で危険度 + 改善案3つ取得
+        // Functions lineStopper（サーバでレート制限 + Gemini）。補助輪としてクライアント側キャッシュ・クールダウンあり
         do {
             let (riskRaw, oneLiner, suggestionTuples) = try await GeminiService.shared.generateLineStopperResult(text: trimmed)
 
@@ -117,7 +96,13 @@ final class LineStopperViewModel: ObservableObject {
             suggestions = suggestionTuples.map { LineStopperSuggestion(label: $0.label, text: $0.text) }
             selectedSuggestion = suggestions.first
         } catch {
-            errorMessage = error.localizedDescription
+            if QuotaService.isUnauthenticated(error) {
+                errorMessage = "接続を確認して再試行してください。"
+            } else if QuotaService.isResourceExhausted(error) {
+                errorMessage = "しばらく待ってからお試しください。"
+            } else {
+                errorMessage = error.localizedDescription
+            }
         }
     }
 
@@ -132,10 +117,11 @@ final class LineStopperViewModel: ObservableObject {
 struct LineStopperRootView: View {
     @StateObject private var vm = LineStopperViewModel()
     @ObservedObject private var pm = PremiumManager.shared
+    @ObservedObject var authVM: AuthViewModel
 
     var body: some View {
         NavigationStack {
-            LineStopperInputView(vm: vm)
+            LineStopperInputView(vm: vm, authVM: authVM)
                 .navigationTitle("地雷LINEストッパー")
                 .navigationBarTitleDisplayMode(.inline)
                 .sheet(isPresented: $vm.shouldShowPaywall) {
@@ -150,10 +136,42 @@ struct LineStopperRootView: View {
 
 struct LineStopperInputView: View {
     @ObservedObject var vm: LineStopperViewModel
+    @ObservedObject var authVM: AuthViewModel
+
+    private var canUseButton: Bool {
+        switch authVM.authState {
+        case .signedIn, .anonymous: return true
+        default: return false
+        }
+    }
+
+    private var buttonLabel: String {
+        switch authVM.authState {
+        case .inProgress, .unknown: return "準備中…"
+        case .failed: return "危険度をチェックする"
+        case .signedIn, .anonymous: return "危険度をチェックする"
+        }
+    }
 
     var body: some View {
         VStack(spacing: 16) {
             header
+
+            if case .failed(let message) = authVM.authState {
+                VStack(spacing: 12) {
+                    Text(message)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                    Button("再試行") {
+                        Task { await authVM.retryAnonymous() }
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+                .padding()
+                .frame(maxWidth: .infinity)
+                .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16))
+            }
 
             TextEditor(text: $vm.inputText)
                 .padding(12)
@@ -173,12 +191,20 @@ struct LineStopperInputView: View {
             }
 
             Button {
-                Task { await vm.generate() }
+                Task {
+                    await authVM.ensureUserBeforeCallable()
+                    guard authVM.uid != nil else {
+                        vm.errorMessage = "接続を確認して再試行してください。"
+                        return
+                    }
+                    await vm.generate()
+                }
             } label: {
-                Text("危険度をチェックする")
+                Text(buttonLabel)
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
+            .disabled(!canUseButton || vm.isLoading || vm.inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
 
             quotaRow
 

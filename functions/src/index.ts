@@ -2,7 +2,7 @@ import { createHash } from "crypto";
 import * as logger from "firebase-functions/logger";
 import { onCall, HttpsError } from "firebase-functions/v2/https";
 import { initializeApp } from "firebase-admin/app";
-import { getFirestore, FieldValue } from "firebase-admin/firestore";
+import { getFirestore, FieldValue, Timestamp } from "firebase-admin/firestore";
 
 // jose は JWS/JWT 検証に使用（Appleの署名検証で必須）
 import { decodeProtectedHeader, importX509, jwtVerify } from "jose";
@@ -280,7 +280,16 @@ export const syncEntitlements = onCall(
         ...logPayload,
         reason: "no_verified_jws",
       });
-      return { ok: false };
+      return {
+        ok: false,
+        plan: "free",
+        ownedProductIDs: [],
+        effectiveUntil: null,
+        reason: "no_verified_jws",
+        verifiedJwsCount,
+        acceptedCount,
+        activeCount,
+      };
     }
 
     // 検証は通ったが現在有効な権利が0件（解約/返金/期限切れのみ）→ free に更新
@@ -300,7 +309,16 @@ export const syncEntitlements = onCall(
         ...logPayload,
         reason: "no_accepted_products",
       });
-      return { ok: true, plan: "free", effectiveUntil: null, ownedProductIDs: [] };
+      return {
+        ok: true,
+        plan: "free",
+        effectiveUntil: null,
+        ownedProductIDs: [],
+        reason: "no_accepted_products",
+        verifiedJwsCount,
+        acceptedCount,
+        activeCount,
+      };
     }
 
     const plan = resolvePlanFromOwnedProducts(activeProductIds);
@@ -321,7 +339,16 @@ export const syncEntitlements = onCall(
       effectiveUntilMs: effectiveUntilMs ?? undefined,
       reason: "ok",
     });
-    return { ok: true, plan, effectiveUntil: effectiveUntilMs, ownedProductIDs: activeProductIDs };
+    return {
+      ok: true,
+      plan,
+      effectiveUntil: effectiveUntilMs,
+      ownedProductIDs: activeProductIDs,
+      reason: "ok",
+      verifiedJwsCount,
+      acceptedCount,
+      activeCount,
+    };
   }
 );
 
@@ -471,5 +498,249 @@ export const consumeRewrite = onCall(
       reason: "plan_unknown",
       paywall: true,
     };
+  }
+);
+
+/**
+ * 3) consumeLineStopper
+ * 地雷LINEストッパー用: ユーザー単位で 1分あたり N回まで（RPM超過の最終防衛）
+ * Firestore: quota/{uid} { windowStart, count }
+ */
+const LINE_STOPPER_LIMIT_PER_MIN = 4;
+
+export const consumeLineStopper = onCall(
+  { region: "asia-northeast1" },
+  async (request) => {
+    const uid = assertAuthed(request);
+
+    const ref = db.collection("quota").doc(uid);
+    const now = Timestamp.now();
+    const nowMs = now.toMillis();
+
+    await db.runTransaction(async (txn) => {
+      const snap = await txn.get(ref);
+      const doc = snap.exists ? snap.data() : null;
+
+      const windowStartMs = doc?.windowStart?.toMillis?.() ?? 0;
+      const count = (doc?.count ?? 0) as number;
+
+      const inSameWindow = nowMs - windowStartMs < 60_000;
+
+      if (!doc || !inSameWindow) {
+        txn.set(ref, { windowStart: now, count: 1 }, { merge: true });
+        return;
+      }
+
+      if (count >= LINE_STOPPER_LIMIT_PER_MIN) {
+        throw new HttpsError("resource-exhausted", "rate limited");
+      }
+
+      txn.update(ref, { count: count + 1 });
+    });
+
+    return { ok: true };
+  }
+);
+
+// --- 地雷LINEストッパー: Functions で Gemini を叩く（キーはサーバのみ・RPM はサーバで握る） ---
+
+const LINE_STOPPER_RPM = 4;
+const GEMINI_MODEL = "gemini-2.0-flash";
+
+type LineStopperResponse = {
+  risk: "LOW" | "MEDIUM" | "HIGH";
+  oneLiner: string;
+  suggestions: { label: string; text: string }[];
+};
+
+function buildLineStopperPrompt(inputText: string): string {
+  return `
+あなたは「送信前LINEチェック」専用の文章コーチです。
+入力文を評価し、後悔リスクと、コピペ可能な改善案を3つ出します。
+
+【入力文】
+${inputText}
+
+【出力ルール（最重要）】
+- 出力はJSON 1個だけ。前後に説明文・挨拶・コードフェンス・改行コメントを一切付けない。
+- JSONのキーは risk, oneLiner, suggestions のみ（この3つ以外を出さない）
+- risk は "LOW" / "MEDIUM" / "HIGH" のいずれか（必ず大文字）
+- oneLiner は40文字以内の日本語1文（必須）
+- suggestions は要素3個ちょうど（label/text必須）
+- label は10文字以内、text は1〜2文でコピペ可能、日本語、敬語寄り
+- 文字列は必ずダブルクォート
+- 末尾にカンマを付けない
+- JSON以外の文字を一切出力しない
+
+{"risk":"LOW","oneLiner":"...","suggestions":[{"label":"...","text":"..."},{"label":"...","text":"..."},{"label":"...","text":"..."}]}
+`.trim();
+}
+
+function lineStopperRateLimit(uid: string): Promise<void> {
+  const ref = db.collection("quota").doc(uid);
+  const now = Timestamp.now();
+  const nowMs = now.toMillis();
+
+  return db.runTransaction(async (txn) => {
+    const snap = await txn.get(ref);
+    const doc = snap.exists ? snap.data() : null;
+
+    const windowStartMs = (doc?.windowStart as { toMillis?: () => number })?.toMillis?.() ?? 0;
+    const count = (doc?.count ?? 0) as number;
+
+    const inSameWindow = nowMs - windowStartMs < 60_000;
+
+    if (!doc || !inSameWindow) {
+      txn.set(ref, { windowStart: now, count: 1 }, { merge: true });
+      return;
+    }
+
+    if (count >= LINE_STOPPER_RPM) {
+      throw new HttpsError("resource-exhausted", "rate limited");
+    }
+
+    txn.update(ref, { count: count + 1 });
+  });
+}
+
+function safeFallbackLineStopper(_input: string): LineStopperResponse {
+  return {
+    risk: "LOW",
+    oneLiner: "送信前に一度確認してみましょう。",
+    suggestions: [
+      { label: "柔らかく", text: "ちょっと気になってることがあるんだけど、時間あるときに話せる？" },
+      { label: "余裕", text: "無理しなくて大丈夫だから、落ち着いたら連絡もらえると嬉しいな" },
+      { label: "距離", text: "一旦この話は置いておくね。またタイミング合うときに話そう" },
+    ],
+  };
+}
+
+function extractBraceBlock(raw: string): string | null {
+  let inString = false;
+  let escape = false;
+  let depth = 0;
+  let start = -1;
+
+  for (let i = 0; i < raw.length; i++) {
+    const c = raw[i];
+
+    if (escape) {
+      escape = false;
+      continue;
+    }
+    if (c === "\\") {
+      if (inString) escape = true;
+      continue;
+    }
+    if (c === '"') {
+      inString = !inString;
+      continue;
+    }
+
+    if (!inString) {
+      if (c === "{") {
+        if (depth === 0) start = i;
+        depth++;
+      } else if (c === "}") {
+        depth--;
+        if (depth === 0 && start !== -1) return raw.slice(start, i + 1);
+      }
+    }
+  }
+  return null;
+}
+
+function sanitizeAndForceLineStopper(jsonObj: unknown): LineStopperResponse {
+  const o = jsonObj as Record<string, unknown> | null | undefined;
+  const riskRaw = String(o?.risk ?? "LOW").toUpperCase();
+  const risk: "LOW" | "MEDIUM" | "HIGH" =
+    riskRaw === "HIGH" || riskRaw === "MEDIUM" || riskRaw === "LOW" ? riskRaw : "LOW";
+
+  const oneLiner =
+    String((o?.oneLiner as string) ?? "").trim() || "送信前に一度確認してみましょう。";
+
+  let suggestions = Array.isArray(o?.suggestions) ? (o.suggestions as unknown[]) : [];
+  suggestions = suggestions
+    .slice(0, 3)
+    .map((s: unknown) => {
+      const t = s as Record<string, unknown>;
+      return {
+        label: String(t?.label ?? "").trim(),
+        text: String(t?.text ?? "").trim(),
+      };
+    })
+    .filter((s: { label: string; text: string }) => s.label && s.text);
+
+  if (suggestions.length < 3) {
+    return safeFallbackLineStopper("");
+  }
+
+  return { risk, oneLiner, suggestions };
+}
+
+async function callGeminiLineStopper(prompt: string, apiKey: string): Promise<string> {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
+  const body = {
+    contents: [{ role: "user", parts: [{ text: prompt }] }],
+    generationConfig: { temperature: 0.2 },
+  };
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    const t = await res.text();
+    throw new Error(`Gemini error: ${res.status} ${t}`);
+  }
+
+  const data = (await res.json()) as {
+    candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+  };
+  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+  return String(text);
+}
+
+/**
+ * lineStopper: 用途 + 入力だけ受け取り、サーバでレート制限・Gemini 呼び出し・JSON 返却。
+ * GEMINI_API_KEY は Firebase の環境変数で設定すること。
+ */
+export const lineStopper = onCall(
+  { region: "asia-northeast1" },
+  async (request) => {
+    const uid = assertAuthed(request);
+
+    const inputText = String(request.data?.text ?? "").trim();
+    if (!inputText) {
+      throw new HttpsError("invalid-argument", "text required");
+    }
+
+    await lineStopperRateLimit(uid);
+
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      logger.error("GEMINI_API_KEY not set. Set in Firebase/Cloud Functions env. Returning fallback.");
+      return safeFallbackLineStopper(inputText);
+    }
+
+    try {
+      const prompt = buildLineStopperPrompt(inputText);
+      const raw = await callGeminiLineStopper(prompt, apiKey);
+      const jsonStr = extractBraceBlock(raw) ?? raw.trim();
+
+      let obj: unknown;
+      try {
+        obj = JSON.parse(jsonStr);
+      } catch {
+        return safeFallbackLineStopper(inputText);
+      }
+
+      return sanitizeAndForceLineStopper(obj);
+    } catch (e) {
+      logger.warn("lineStopper Gemini or parse error", e);
+      return safeFallbackLineStopper(inputText);
+    }
   }
 );

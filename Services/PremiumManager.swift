@@ -491,7 +491,17 @@ final class PremiumManager: ObservableObject {
         let callable = functions.httpsCallable("syncEntitlements")
         do {
             let result = try await callable.call(["transactions": transactions])
-            guard let data = result.data as? [String: Any], (data["ok"] as? Bool) == true else {
+            guard let data = result.data as? [String: Any] else {
+                await MainActor.run { lastError = "プレミアム反映に失敗しました。復元をお試しください。" }
+                return false
+            }
+            let reason = data["reason"] as? String ?? "?"
+            let verifiedJwsCount = data["verifiedJwsCount"] as? Int ?? -1
+            let acceptedCount = data["acceptedCount"] as? Int ?? -1
+            let activeCount = data["activeCount"] as? Int ?? -1
+            let effectiveUntil = data["effectiveUntil"] as? NSNumber
+            log.info("syncEntitlements response ok=\(data["ok"] as? Bool ?? false) plan=\(data["plan"] as? String ?? "?") reason=\(reason) verifiedJwsCount=\(verifiedJwsCount) acceptedCount=\(acceptedCount) activeCount=\(activeCount) effectiveUntil=\(effectiveUntil?.stringValue ?? "null")", privacy: .public)
+            guard (data["ok"] as? Bool) == true else {
                 await MainActor.run { lastError = "プレミアム反映に失敗しました。復元をお試しください。" }
                 return false
             }

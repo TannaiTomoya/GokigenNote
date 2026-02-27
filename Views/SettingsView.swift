@@ -17,6 +17,7 @@ struct SettingsView: View {
     @State private var showSignOutAlert = false
     @State private var showTerms = false
     @State private var showPrivacy = false
+    @State private var showAuthView = false
 
     var body: some View {
         NavigationStack {
@@ -162,6 +163,17 @@ struct SettingsView: View {
                     .padding(.vertical, 4)
                 }
                 
+                // 匿名のときはメール/Googleログインを出せる
+                if case .anonymous = authVM.authState {
+                    Section {
+                        Button { showAuthView = true } label: {
+                            Label("メールでログイン", systemImage: "envelope")
+                        }
+                    } header: {
+                        Text("アカウント")
+                    }
+                }
+
                 // ログアウトセクション
                 if authVM.isAuthenticated {
                     Section {
@@ -201,6 +213,9 @@ struct SettingsView: View {
         }
         .sheet(isPresented: $showPrivacy) {
             PrivacyPolicyView()
+        }
+        .sheet(isPresented: $showAuthView) {
+            AuthView(authVM: authVM)
         }
     }
     

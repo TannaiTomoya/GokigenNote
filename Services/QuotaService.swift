@@ -38,6 +38,19 @@ final class QuotaService {
         return ns.localizedDescription.lowercased().contains("unauthenticated")
     }
 
+    /// resource-exhausted（レート制限）かどうか
+    static func isResourceExhausted(_ error: Error) -> Bool {
+        let ns = error as NSError
+        if let code = ns.userInfo["code"] as? String, code == "resource-exhausted" { return true }
+        return ns.localizedDescription.lowercased().contains("rate limit") || ns.localizedDescription.lowercased().contains("resource-exhausted")
+    }
+
+    /// 地雷LINEストッパー用: 1分あたりN回のサーバ側ガード。通過すれば OK、超過時は resource-exhausted で throw。
+    func consumeLineStopper() async throws {
+        let callable = functions.httpsCallable("consumeLineStopper")
+        _ = try await callable.call([:])
+    }
+
     /// P1A: consumeRewrite を呼ぶ。allowed:false なら AI は叩かず Paywall 表示。
     func consumeRewrite(op: QuotaOp, draftEntryId: String? = nil) async throws -> QuotaCheckResult {
         var data: [String: Any] = ["op": op.rawValue]

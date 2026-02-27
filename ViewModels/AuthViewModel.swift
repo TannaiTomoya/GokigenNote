@@ -10,23 +10,51 @@ import SwiftUI
 import Combine
 import FirebaseAuth
 
+/// 認証プロセス結果（UIは即描画、この状態でボタン制御）
+enum AuthState: Equatable {
+    case unknown
+    case inProgress
+    case signedIn(uid: String)
+    case anonymous(uid: String)
+    case failed(message: String)
+
+    var uid: String? {
+        switch self {
+        case .signedIn(let uid), .anonymous(let uid): return uid
+        default: return nil
+        }
+    }
+
+    var isUsable: Bool {
+        uid != nil
+    }
+}
+
 @MainActor
 final class AuthViewModel: ObservableObject {
-    @Published var currentUser: User?
-    @Published private(set) var isAuthenticated = false
-    @Published private(set) var authReady = false
-    @Published private(set) var uid: String?
+    @Published private(set) var authState: AuthState = .unknown
+    @Published var currentUser: AppUser?
     @Published private(set) var isLoading = false
     @Published var errorMessage: String?
     @Published var successMessage: String?
 
+    /// 互換用。authState.uid と同期
+    var uid: String? { authState.uid }
+    /// 互換用。signedIn / anonymous なら true
+    var isAuthenticated: Bool { authState.isUsable }
+    /// 互換用。uid が取れる状態なら true（AuthGate / MainTabView 用）
+    var authReady: Bool { authState.isUsable }
+
     private let authService = AuthService.shared
     private var authStateHandle: AuthStateDidChangeListenerHandle?
-    /// セッション復元でも ensureUserDoc を1回だけ叩くための重複防止
     private var ensuredUserDocUID: String?
+    /// 匿名ログインの多重実行防止
+    private var anonymousSignInTask: Task<Void, Never>?
+
+    private static let anonymousBackoffSeconds: [UInt64] = [1, 2, 4]
+    private static let anonymousMaxTries = 3
 
     init() {
-        print("✅ AuthViewModel init. isLoading=\(isLoading)")
         setupAuthStateListener()
     }
 
@@ -41,42 +69,79 @@ final class AuthViewModel: ObservableObject {
         }
     }
 
-    // MARK: - Auth State Listener（確定前にDBを触らない＝authReady でゲート）
+    // MARK: - Auth State Listener
 
     private func setupAuthStateListener() {
         authStateHandle = Auth.auth().addStateDidChangeListener { [weak self] _, user in
             guard let self else { return }
             Task { @MainActor in
-                self.uid = user?.uid
                 if let user {
-                    self.currentUser = User(
+                    self.currentUser = AppUser(
                         id: user.uid,
                         email: user.email,
                         displayName: user.displayName
                     )
-                    self.isAuthenticated = true
+                    self.authState = user.isAnonymous ? .anonymous(uid: user.uid) : .signedIn(uid: user.uid)
+                    PremiumManager.shared.setCurrentUserId(user.uid)
+
+                    if self.ensuredUserDocUID != user.uid {
+                        self.ensuredUserDocUID = user.uid
+                        do {
+                            try await FirestoreService.shared.ensureUserDoc(
+                                uid: user.uid,
+                                email: user.email,
+                                displayName: user.displayName
+                            )
+                        } catch {
+                            print("[AuthViewModel] ensureUserDoc failed: \(error)")
+                        }
+                    }
                 } else {
                     self.currentUser = nil
-                    self.isAuthenticated = false
                     self.ensuredUserDocUID = nil
-                }
-                self.authReady = true
-
-                // セッション復元でも必ず user doc を用意（idempotent・重複防止）
-                if let u = user, self.ensuredUserDocUID != u.uid {
-                    self.ensuredUserDocUID = u.uid
-                    do {
-                        try await FirestoreService.shared.ensureUserDoc(
-                            uid: u.uid,
-                            email: u.email,
-                            displayName: u.displayName
-                        )
-                    } catch {
-                        print("[AuthViewModel] ensureUserDoc failed: \(error)")
-                    }
+                    PremiumManager.shared.setCurrentUserId(nil)
+                    self.startAnonymousSignInIfNeeded()
                 }
             }
         }
+    }
+
+    /// 匿名ログインを1本化。既に実行中 or 既にユーザーがいれば何もしない
+    private func startAnonymousSignInIfNeeded() {
+        guard Auth.auth().currentUser == nil else { return }
+        guard anonymousSignInTask == nil else { return }
+        authState = .inProgress
+        anonymousSignInTask = Task { [weak self] in
+            guard let self else { return }
+            await self.tryAnonymousWithBackoff()
+            await MainActor.run { self.anonymousSignInTask = nil }
+        }
+    }
+
+    /// 指数バックオフで匿名ログイン（1s→2s→4s、最大3回）。失敗時は authState = .failed
+    private func tryAnonymousWithBackoff() async {
+        for (index, delaySec) in Self.anonymousBackoffSeconds.enumerated() {
+            if index > 0 {
+                try? await Task.sleep(nanoseconds: delaySec * 1_000_000_000)
+            }
+            do {
+                _ = try await Auth.auth().signInAnonymously()
+                return
+            } catch {
+                print("[AuthViewModel] signInAnonymously attempt \(index + 1) failed: \(error)")
+            }
+        }
+        authState = .failed(message: "接続を確認して再試行してください。")
+    }
+
+    /// 匿名ログイン失敗後の「再試行」ボタン用
+    func retryAnonymous() async {
+        startAnonymousSignInIfNeeded()
+    }
+
+    /// callable 実行前に呼ぶ。匿名ログインが未完了なら同じ1本のタスクを叩く（連打対策）
+    func ensureUserBeforeCallable() async {
+        startAnonymousSignInIfNeeded()
     }
 
     // MARK: - Utilities

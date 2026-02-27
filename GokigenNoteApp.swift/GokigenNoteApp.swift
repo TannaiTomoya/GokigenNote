@@ -37,13 +37,7 @@ struct GokigenNoteApp: App {
     
     var body: some Scene {
         WindowGroup {
-            Group {
-                if authVM.isAuthenticated {
-                    MainTabView(authVM: authVM)
-                } else {
-                    AuthView(authVM: authVM)
-                }
-            }
+            MainTabView(authVM: authVM)
             .sheet(isPresented: Binding(
                 get: { paywall.isPresented },
                 set: { newValue in
@@ -51,10 +45,6 @@ struct GokigenNoteApp: App {
                 }
             )) {
                 PaywallView()
-            }
-            .onAppear {
-                print("🏁 [GokigenNoteApp] アプリ起動")
-                print("🏁 [GokigenNoteApp] isAuthenticated: \(authVM.isAuthenticated)")
             }
         }
         .onChange(of: scenePhase) { newValue in

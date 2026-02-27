@@ -94,6 +94,16 @@ touch Gemini-Info.plist
 
 これで Gemini API が有効になります！
 
+#### 4. Firebase Functions（地雷LINEストッパー）で Gemini を使う場合
+
+地雷LINEストッパーは **Functions 経由**で Gemini を叩きます。キーはサーバ側のみで保持します。
+
+1. [Firebase Console](https://console.firebase.google.com/) → プロジェクト → **Functions** → **環境変数**（または Cloud Functions の設定）
+2. **GEMINI_API_KEY** を追加し、Gemini API キーを設定
+3. `firebase deploy --only functions` で再デプロイ
+
+未設定の場合は lineStopper はフォールバック応答を返します（アプリは落ちません）。
+
 ---
 
 ## 🔍 動作確認
