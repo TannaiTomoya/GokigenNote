@@ -185,7 +185,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "if [ ! -f \"${SRCROOT}/Gemini-Info.plist\" ]; then\n  cp \"${SRCROOT}/Gemini-Info.plist.example\" \"${SRCROOT}/Gemini-Info.plist\"\n  echo \"Created Gemini-Info.plist from example. Replace API_KEY with your key.\"\nfi\ncp \"${SRCROOT}/Gemini-Info.plist\" \"${BUILT_PRODUCTS_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/Gemini-Info.plist\"\n";
+			shellScript = "if [ -f \"${SRCROOT}/Gemini-Info.plist\" ]; then\n  cp \"${SRCROOT}/Gemini-Info.plist\" \"${BUILT_PRODUCTS_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/Gemini-Info.plist\"\nelse\n  echo \"Warning: Gemini-Info.plist not found. Copy from Gemini-Info.plist.example and set API_KEY.\"\n  cp \"${SRCROOT}/Gemini-Info.plist.example\" \"${BUILT_PRODUCTS_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/Gemini-Info.plist\"\nfi\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
