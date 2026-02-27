@@ -55,6 +55,9 @@ enum AuthError: LocalizedError {
     }
 }
 
+/// OAuth 認証 UI 用。Firebase の getCredentialWith が要求する AuthUIDelegate を満たす
+private final class OAuthPresenterViewController: UIViewController, AuthUIDelegate {}
+
 final class AuthService {
     static let shared = AuthService()
     private init() {}
