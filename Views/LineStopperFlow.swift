@@ -48,6 +48,8 @@ struct LineStopperSuggestion: Identifiable, Hashable {
 
 @MainActor
 final class LineStopperViewModel: ObservableObject {
+    nonisolated init() {}
+
     @Published var inputText: String = ""
     @Published var isLoading: Bool = false
     @Published var errorMessage: String?
