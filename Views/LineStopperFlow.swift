@@ -101,7 +101,12 @@ final class LineStopperViewModel: ObservableObject {
             } else if QuotaService.isResourceExhausted(error) {
                 errorMessage = "しばらく待ってからお試しください。"
             } else {
-                errorMessage = error.localizedDescription
+                let raw = error.localizedDescription
+                if raw.contains("NOT FOUND") || raw.lowercased().contains("not found") || raw.contains("404") {
+                    errorMessage = "危険度チェックは一時的に利用できません。しばらくしてからお試しください。"
+                } else {
+                    errorMessage = raw
+                }
             }
         }
     }

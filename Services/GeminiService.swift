@@ -162,70 +162,12 @@ final class GeminiService {
         }
     }
 
+    /// 言い換え: Functions の reformulate を呼ぶ（キーはサーバ側のみ・アプリに渡さない）
     func reformulateText(for text: String, context: ReformulationContext) async throws -> String {
-        guard let client else { throw GeminiError.apiKeyNotAvailable }
-
-        logger.info("Requesting text reformulation...")
-        let sceneName = context.scene.displayName
-        let prompt = """
-        以下の発言を「\(sceneName)」の場面で自然に伝わる表現に言い換えてください。
-
-        ・相手に伝わる
-        ・誤解されない
-        ・簡潔
-
-        【追加の指定】
-        - 目的：\(context.purpose.rawValue)
-        - 相手：\(context.audience.rawValue)
-        - トーン：\(context.tone.rawValue)
-
-        入力:
-        \(text)
-
-        上記に沿って言語化し、200文字以内でまとめてください。説明やラベルは不要です。文章のみを返してください。
-        """
-        print("[Gemini] API Request: reformulateText, text=\(text), scene=\(sceneName), purpose=\(context.purpose.rawValue), audience=\(context.audience.rawValue), tone=\(context.tone.rawValue)")
-
-        do {
-            let raw = try await withTimeout(15) { [client] in
-                try await client.generateText(prompt)
-            }
-            print("[Gemini] API Response: reformulateText, ok")
-            print("[Gemini] TEXT: \(raw.isEmpty ? "empty" : raw)")
-            logger.info("Text reformulation completed.")
-
-            var reformulatedText = raw.isEmpty ? text : raw
-            if raw.isEmpty {
-                print("[Gemini] WARN: response.text is empty, using input as fallback")
-            }
-
-            let unwantedPrefixes = [
-                "整形した文章：",
-                "整形した文章:",
-                "言い換え：",
-                "言い換え:",
-                "回答：",
-                "回答:",
-                "「",
-                "」"
-            ]
-
-            for prefix in unwantedPrefixes {
-                if reformulatedText.hasPrefix(prefix) {
-                    reformulatedText = String(reformulatedText.dropFirst(prefix.count))
-                }
-                if reformulatedText.hasSuffix(prefix) {
-                    reformulatedText = String(reformulatedText.dropLast(prefix.count))
-                }
-            }
-
-            return reformulatedText.trimmingCharacters(in: .whitespacesAndNewlines)
-        } catch {
-            let ns = error as NSError
-            print("[Gemini] ERROR reformulateText: \(error)")
-            print("[Gemini] NSError domain=\(ns.domain) code=\(ns.code) userInfo=\(ns.userInfo)")
-            throw error
-        }
+        logger.info("Requesting text reformulation via Functions...")
+        let result = try await ReformulateRemoteService.shared.reformulate(text: text, context: context)
+        logger.info("Text reformulation completed.")
+        return result
     }
 
     /// 地雷LINEストッパー: キャッシュ → レート制限（補助輪）→ Functions lineStopper 呼び出し（キー・RPM はサーバ）
@@ -454,6 +396,13 @@ final class GeminiService {
     }
 }
 
-enum GeminiError: Error {
+enum GeminiError: Error, LocalizedError {
     case apiKeyNotAvailable
+
+    var errorDescription: String? {
+        switch self {
+        case .apiKeyNotAvailable:
+            return "APIキーが未設定です。サーバー設定をご確認ください。"
+        }
+    }
 }

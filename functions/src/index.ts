@@ -675,14 +675,15 @@ function sanitizeAndForceLineStopper(jsonObj: unknown): LineStopperResponse {
     return safeFallbackLineStopper("");
   }
 
-  return { risk, oneLiner, suggestions };
+  return { risk, oneLiner, suggestions: suggestions as { label: string; text: string }[] };
 }
 
-async function callGeminiLineStopper(prompt: string, apiKey: string): Promise<string> {
+/** Gemini 汎用テキスト生成（lineStopper / reformulate 共通） */
+async function callGeminiText(prompt: string, apiKey: string, temperature = 0.2): Promise<string> {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
   const body = {
     contents: [{ role: "user", parts: [{ text: prompt }] }],
-    generationConfig: { temperature: 0.2 },
+    generationConfig: { temperature },
   };
 
   const res = await fetch(url, {
@@ -727,7 +728,7 @@ export const lineStopper = onCall(
 
     try {
       const prompt = buildLineStopperPrompt(inputText);
-      const raw = await callGeminiLineStopper(prompt, apiKey);
+      const raw = await callGeminiText(prompt, apiKey, 0.2);
       const jsonStr = extractBraceBlock(raw) ?? raw.trim();
 
       let obj: unknown;
@@ -741,6 +742,77 @@ export const lineStopper = onCall(
     } catch (e) {
       logger.warn("lineStopper Gemini or parse error", e);
       return safeFallbackLineStopper(inputText);
+    }
+  }
+);
+
+// --- 言い換え: Functions で Gemini を叩く（キーはサーバのみ） ---
+
+function buildReformulatePrompt(text: string, scene: string, purpose: string, audience: string, tone: string): string {
+  return `
+以下の発言を「${scene}」の場面で自然に伝わる表現に言い換えてください。
+
+・相手に伝わる
+・誤解されない
+・簡潔
+
+【追加の指定】
+- 目的：${purpose}
+- 相手：${audience}
+- トーン：${tone}
+
+入力:
+${text}
+
+上記に沿って言語化し、200文字以内でまとめてください。説明やラベルは不要です。文章のみを返してください。
+`.trim();
+}
+
+function sanitizeReformulateResponse(raw: string): string {
+  const prefixes = [
+    "整形した文章：", "整形した文章:", "言い換え：", "言い換え:", "回答：", "回答:", "「", "」",
+  ];
+  let out = raw.trim();
+  for (const p of prefixes) {
+    if (out.startsWith(p)) out = out.slice(p.length);
+    if (out.endsWith(p)) out = out.slice(0, -p.length);
+  }
+  return out.trim();
+}
+
+/**
+ * reformulate: 言い換え。text + scene/purpose/audience/tone を受け取り、サーバで Gemini 呼び出し。
+ * GEMINI_API_KEY は Firebase の環境変数で設定すること。
+ */
+export const reformulate = onCall(
+  { region: "asia-northeast1" },
+  async (request) => {
+    assertAuthed(request);
+
+    const text = String(request.data?.text ?? "").trim();
+    if (!text) {
+      throw new HttpsError("invalid-argument", "text required");
+    }
+
+    const scene = String(request.data?.scene ?? "仕事");
+    const purpose = String(request.data?.purpose ?? "気持ちを伝えたい");
+    const audience = String(request.data?.audience ?? "同僚");
+    const tone = String(request.data?.tone ?? "柔らかい");
+
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      logger.error("GEMINI_API_KEY not set. Set in Firebase/Cloud Functions env.");
+      throw new HttpsError("failed-precondition", "API key not configured on server.");
+    }
+
+    try {
+      const prompt = buildReformulatePrompt(text, scene, purpose, audience, tone);
+      const raw = await callGeminiText(prompt, apiKey, 0.3);
+      const result = sanitizeReformulateResponse(raw);
+      return { text: result || text };
+    } catch (e) {
+      logger.warn("reformulate Gemini error", e);
+      throw new HttpsError("internal", "Reformulation failed.");
     }
   }
 );
