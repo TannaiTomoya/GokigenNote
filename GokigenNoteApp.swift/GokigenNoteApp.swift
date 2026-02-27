@@ -32,6 +32,7 @@ struct GokigenNoteApp: App {
     @ObservedObject private var paywall = PaywallCoordinator.shared
 
     init() {
+        FirebaseApp.configure()
         PremiumManager.shared.start()
     }
     
