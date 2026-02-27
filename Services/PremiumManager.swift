@@ -500,7 +500,8 @@ final class PremiumManager: ObservableObject {
             let acceptedCount = data["acceptedCount"] as? Int ?? -1
             let activeCount = data["activeCount"] as? Int ?? -1
             let effectiveUntil = data["effectiveUntil"] as? NSNumber
-            log.info("syncEntitlements response ok=\(data["ok"] as? Bool ?? false) plan=\(data["plan"] as? String ?? "?") reason=\(reason) verifiedJwsCount=\(verifiedJwsCount) acceptedCount=\(acceptedCount) activeCount=\(activeCount) effectiveUntil=\(effectiveUntil?.stringValue ?? "null")", privacy: .public)
+            let syncMsg = "syncEntitlements response ok=\(data["ok"] as? Bool ?? false) plan=\(data["plan"] as? String ?? "?") reason=\(reason) verifiedJwsCount=\(verifiedJwsCount) acceptedCount=\(acceptedCount) activeCount=\(activeCount) effectiveUntil=\(effectiveUntil?.stringValue ?? "null")"
+            log.info("\(syncMsg, privacy: .public)")
             guard (data["ok"] as? Bool) == true else {
                 await MainActor.run { lastError = "プレミアム反映に失敗しました。復元をお試しください。" }
                 return false
