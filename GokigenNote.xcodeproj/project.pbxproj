@@ -7,8 +7,6 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		A808D9AA2F4723F200D9922F /* GokigenNote-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = A86407E12ED1BF73005DD4B1 /* GokigenNote-Info.plist */; };
-		A808D9AC2F4723F300D9922F /* Gemini-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = A808D9AD2F4723F300D9922F /* Gemini-Info.plist */; };
 		A86406162ED02F1D005DD4B1 /* GoogleGenerativeAI in Frameworks */ = {isa = PBXBuildFile; productRef = A86406152ED02F1D005DD4B1 /* GoogleGenerativeAI */; };
 		A86407D62ED1AD02005DD4B1 /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = A86407D52ED1AD02005DD4B1 /* FirebaseAuth */; };
 		A86407DE2ED1BA41005DD4B1 /* FirebaseCore in Frameworks */ = {isa = PBXBuildFile; productRef = A86407DD2ED1BA41005DD4B1 /* FirebaseCore */; };
@@ -178,7 +176,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "if [ ! -f \"${SRCROOT}/Gemini-Info.plist\" ]; then\n  cp \"${SRCROOT}/Gemini-Info.plist.example\" \"${SRCROOT}/Gemini-Info.plist\"\n  echo \"Created Gemini-Info.plist from example. Replace API_KEY with your key.\"\nfi\n";
+			shellScript = "if [ ! -f \"${SRCROOT}/Gemini-Info.plist\" ]; then\n  cp \"${SRCROOT}/Gemini-Info.plist.example\" \"${SRCROOT}/Gemini-Info.plist\"\n  echo \"Created Gemini-Info.plist from example. Replace API_KEY with your key.\"\nfi\ncp \"${SRCROOT}/Gemini-Info.plist\" \"${BUILT_PRODUCTS_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/Gemini-Info.plist\"\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
@@ -187,8 +185,6 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				A808D9AC2F4723F300D9922F /* Gemini-Info.plist in Resources */,
-				A808D9AA2F4723F200D9922F /* GokigenNote-Info.plist in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
