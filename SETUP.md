@@ -37,6 +37,8 @@ open GokigenNote.xcodeproj
 
 #### 2. APIキーを設定（2つの方法）
 
+> **⚠️ セキュリティ:** API キーはリポジトリにコミットしないでください。共有スキームに value を書かず、環境変数または `.gitignore` 済みの `Gemini-Info.plist` で設定してください。
+
 ##### 方法A: 環境変数で設定（推奨）
 
 **Xcodeのスキーム設定から環境変数を追加：**

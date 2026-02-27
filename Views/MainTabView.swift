@@ -15,6 +15,12 @@ struct MainTabView: View {
 
     var body: some View {
         TabView {
+            // 地雷LINEストッパー
+            LineStopperRootView()
+                .tabItem {
+                    Label("地雷LINE", systemImage: "bubble.left.and.bubble.right")
+                }
+
             // 今日の問い
             TodayView(vm: vm)
                 .tabItem {
