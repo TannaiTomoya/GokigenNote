@@ -36,26 +36,20 @@ final class PremiumManager: ObservableObject {
 
     /// StoreKit 2 の現在の購入状態から premium 判定
     func refreshEntitlements(mode: PremiumRefreshMode) async {
-        do {
-            var hasActive = false
-            for await result in Transaction.currentEntitlements {
-                switch result {
-                case .verified(let tx):
-                    // auto-renewable / non-consumable を premium 扱いにする最小実装
-                    if tx.productType == .autoRenewable || tx.productType == .nonConsumable {
-                        hasActive = true
-                    }
-                case .unverified:
-                    continue
+        var hasActive = false
+        for await result in Transaction.currentEntitlements {
+            switch result {
+            case .verified(let tx):
+                // auto-renewable / non-consumable を premium 扱いにする最小実装
+                if tx.productType == .autoRenewable || tx.productType == .nonConsumable {
+                    hasActive = true
                 }
+            case .unverified:
+                continue
             }
-            self.isPremium = hasActive
-            self.lastErrorMessage = nil
-        } catch {
-            self.lastErrorMessage = error.localizedDescription
-            // 失敗時は premium を false に倒す（安全側）
-            self.isPremium = false
         }
+        self.isPremium = hasActive
+        self.lastErrorMessage = nil
     }
 
     /// 「購入を復元」ボタン用（PaywallView から呼ぶ）
@@ -68,3 +62,4 @@ final class PremiumManager: ObservableObject {
         }
     }
 }
+

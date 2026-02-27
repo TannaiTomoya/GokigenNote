@@ -161,3 +161,4 @@ final class TrainingViewModel: ObservableObject {
 extension Notification.Name {
     static let trainingCompleted = Notification.Name("trainingCompleted")
 }
+

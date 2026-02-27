@@ -48,7 +48,7 @@ struct GokigenNoteApp: App {
                 PaywallView()
             }
         }
-        .onChange(of: scenePhase) { newValue in
+        .onChange(of: scenePhase) { oldValue, newValue in
             if newValue == .active {
                 Task { await PremiumManager.shared.refreshEntitlements(mode: .startupCautious) }
             }
