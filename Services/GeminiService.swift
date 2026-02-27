@@ -62,6 +62,7 @@ private struct LineStopperAIResponse: Codable {
 }
 
 final class GeminiService {
+    static let shared = GeminiService()
     private let client: GeminiClient?
     private let logger = Logger(subsystem: "GokigenNote", category: "GeminiService")
 
