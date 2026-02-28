@@ -174,7 +174,6 @@
 			inputFileListPaths = (
 			);
 			inputPaths = (
-				"$(SRCROOT)/Gemini-Info.plist",
 				"$(SRCROOT)/Gemini-Info.plist.example",
 			);
 			name = "Ensure Gemini-Info.plist";
