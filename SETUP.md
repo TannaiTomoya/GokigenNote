@@ -1,0 +1,217 @@
+# セットアップガイド
+
+## Gemini API キー（要約）
+
+**Gemini キー:** .gitignore の plist か環境変数で設定。リポジトリには .example のみ。本番は Functions 推奨。言い換え／共感は Functions 経由のため、本番では iOS にキーを置かず Functions 側で管理する運用を推奨。
+
+---
+
+## 🚀 クイックスタート
+
+### 1. プロジェクトをクローン
+
+```bash
+git clone <repository-url>
+cd GokigenNote-1
+```
+
+### 2. Xcodeでプロジェクトを開く
+
+```bash
+open GokigenNote.xcodeproj
+```
+
+### 3. ビルド＆実行
+
+1. **デバイスまたはシミュレーターを選択**
+2. **⌘R を押す** または **Product → Run**
+3. アプリが起動します！
+
+> **注意**: 初回ビルド時、Swift Package Manager が `GoogleGenerativeAI` パッケージを自動的にダウンロードします。
+
+---
+
+## 🔥 Firebase（GoogleService-Info.plist）の設定（必須）
+
+ビルドを通すには **GoogleService-Info.plist** をプロジェクトルートに置く必要があります。APIキー等を漏らさないため、**Firebase Console から取得したファイルをそのまま配置する**方法を推奨します。
+
+### 推奨手順
+
+1. [Firebase Console](https://console.firebase.google.com/) でプロジェクトを開く
+2. **プロジェクトの設定**（歯車アイコン）→ **全般** → **マイアプリ** で iOS アプリを選択（なければ追加）
+3. **GoogleService-Info.plist** をダウンロード
+4. ダウンロードしたファイルを **プロジェクトルート** に配置（ファイル名は `GoogleService-Info.plist` のまま）
+5. Xcode で **Product → Clean Build Folder** のあとビルド
+
+> **⚠️ セキュリティ**
+> - `GoogleService-Info.plist` は `.gitignore` に含まれており、コミット・push されません
+> - 本番のキーが入ったファイルをリポジトリに含めないでください
+> - 他の開発者や CI では、各自が Firebase Console から取得して同じ場所に配置してください
+
+---
+
+## 🔧 Gemini API の設定（オプション）
+
+アプリは Gemini API なしでも動作しますが、より高度な言い換え機能を使いたい場合は以下の手順で設定してください。
+
+### 手順
+
+#### 1. Google AI Studio でAPIキーを取得
+
+[Google AI Studio](https://makersuite.google.com/app/apikey) にアクセスして、無料のAPIキーを取得します。
+
+#### 2. APIキーを設定（2つの方法）
+
+> **⚠️ セキュリティ:** API キーはリポジトリにコミットしないでください。共有スキームに value を書かず、環境変数または `.gitignore` 済みの `Gemini-Info.plist` で設定してください。
+
+##### 方法A: 環境変数で設定（推奨）
+
+**Xcodeのスキーム設定から環境変数を追加：**
+
+1. Xcode で `Product` → `Scheme` → `Edit Scheme...` を選択
+2. 左側のメニューから `Run` を選択
+3. `Arguments` タブをクリック
+4. `Environment Variables` セクションで `+` ボタンをクリック
+5. 以下を追加：
+   - **Name**: `GEMINI_API_KEY`
+   - **Value**: 取得したAPIキー
+6. `Close` をクリック
+
+**または、ターミナルから起動：**
+
+```bash
+cd /Users/tannaitomoya/swift-camp/GokigenNote-1
+export GEMINI_API_KEY="your-api-key-here"
+open GokigenNote.xcodeproj
+```
+
+##### 方法B: plistファイルで設定
+
+プロジェクトルートに `Gemini-Info.plist` ファイルを作成します：
+
+```bash
+cd /Users/tannaitomoya/swift-camp/GokigenNote-1
+cp Gemini-Info.plist.example Gemini-Info.plist
+```
+
+`Gemini-Info.plist` を開いて、`API_KEY` の値を取得したAPIキーに書き換えます。
+
+> **⚠️ 重要**: 
+> - APIキーの読み込み優先順位: 1. 環境変数 → 2. plistファイル
+> - `Gemini-Info.plist` は `.gitignore` に含まれているため、Git にコミットされません
+> - APIキーは絶対に公開リポジトリにプッシュしないでください
+
+#### 3. ビルド＆実行
+
+- **Clean Build**: ⌥⇧⌘K
+- **Run**: ⌘R
+
+これで Gemini API が有効になります！
+
+#### 4. Firebase Functions（言い換え・危険度チェック）【推奨・APIキーを漏らさない】
+
+**言い換え**と**危険度チェック**はどちらも **Firebase Functions**（`lineStopper` / `reformulate`）経由です。Gemini API キーは**サーバ側のみ**で保持し、アプリには渡しません。
+
+1. [Firebase Console](https://console.firebase.google.com/) → プロジェクト → **Functions** → **環境変数**（または Cloud Functions の設定）
+2. **GEMINI_API_KEY** を追加し、Gemini API キーを設定
+3. プロジェクトルートで `firebase deploy --only functions` を実行（`lineStopper` と `reformulate` がデプロイされます）
+
+未設定の場合は lineStopper はフォールバック応答を返します（アプリは落ちません）。
+
+---
+
+## 🔍 動作確認
+
+### ローカルモード（デフォルト）
+
+1. アプリを起動
+2. 気分を選択
+3. テキストを入力
+4. 「言い換えをつくる」をタップ
+5. → ローカルの `EmpathyEngine` が動作します
+
+### Gemini モード（API設定後）
+
+1. 上記の手順でAPIキーを設定
+2. アプリを再ビルド
+3. 「言い換えをつくる」をタップ
+4. → Gemini API が呼ばれ、より高度な言い換えが生成されます
+
+---
+
+## 🐛 トラブルシューティング
+
+### ビルドエラー: "Build input file cannot be found: .../GoogleService-Info.plist"
+
+**原因**: `GoogleService-Info.plist` がプロジェクトルートにない（.gitignore のため clone 後は存在しない）。
+
+**解決方法**: 上記「Firebase（GoogleService-Info.plist）の設定」に従い、Firebase Console からダウンロードしたファイルをプロジェクトルートに配置してください。
+
+### ビルドエラー: "No such module 'GoogleGenerativeAI'"
+
+**解決方法**:
+1. Xcode でメニューから **File → Packages → Reset Package Caches**
+2. **Product → Clean Build Folder** (⌥⇧⌘K)
+3. 再ビルド (⌘B)
+
+### アプリが起動時にクラッシュする
+
+**解決方法**:
+1. すべてのブレークポイントを無効化: **⌘Y**
+2. DerivedData を削除:
+   ```bash
+   rm -rf ~/Library/Developer/Xcode/DerivedData/GokigenNote-*
+   ```
+3. Clean Build: ⌥⇧⌘K
+4. 再ビルド: ⌘R
+
+### "Gemini API key not found" 警告
+
+これは**警告**であり、エラーではありません。アプリは正常に動作します（ローカルモード）。
+
+Gemini API を使いたい場合は、上記の「Gemini API の設定」を参照してください。
+
+---
+
+## 📱 推奨テスト環境
+
+- **iOS 18.0+**
+- **実機**: iPhone 14 以降推奨
+- **シミュレーター**: iPhone 15 Pro
+
+---
+
+## 🔒 セキュリティ
+
+- **APIキーは絶対に公開しないでください**
+- `Gemini-Info.plist` は `.gitignore` に含まれています
+- ローカルデータは UserDefaults に保存（デバイス内のみ）
+
+---
+
+## 💡 ヒント
+
+### Clean Build が必要なタイミング
+
+- パッケージ依存関係を変更した後
+- プロジェクト設定を変更した後
+- 原因不明のビルドエラーが発生した時
+
+### ブレークポイントを一括無効化
+
+デバッグ中にブレークポイントで止まりすぎる場合：
+- **⌘Y** で一括無効化/有効化を切り替え
+
+### データをリセット
+
+アプリのデータをリセットしたい場合：
+1. アプリをアンインストール
+2. または、シミュレーターで **Device → Erase All Content and Settings...**
+
+---
+
+## 📚 さらに詳しく
+
+- [README.md](./README.md) - プロジェクト概要
+- [Apple SwiftUI Documentation](https://developer.apple.com/documentation/swiftui)
+- [Google Gemini API Documentation](https://ai.google.dev/docs)
