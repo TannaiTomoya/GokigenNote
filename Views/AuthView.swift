@@ -50,6 +50,9 @@ struct AuthView: View {
             .onChange(of: isSignUp) { _, _ in
                 authVM.clearMessages()
             }
+            .onDisappear {
+                UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+            }
         }
     }
 

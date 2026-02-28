@@ -544,13 +544,14 @@ final class GokigenViewModel: ObservableObject {
                 )
 
                 await MainActor.run {
+                    PremiumManager.shared.applyServerQuota(used: quota.used, remaining: quota.remaining, limit: quota.limit, resetKey: quota.resetKey)
                     guard self.empathyRequestID == token.id else { return }
                 }
 
                 if !quota.allowed {
                     await MainActor.run {
                         self.publishError(message: "回数上限に達しました。プレミアムで無制限にできます。")
-                        if quota.paywall { PaywallCoordinator.shared.present() }
+                        PaywallCoordinator.shared.present()
                     }
                     return
                 }
@@ -646,13 +647,14 @@ final class GokigenViewModel: ObservableObject {
                 )
 
                 await MainActor.run {
+                    PremiumManager.shared.applyServerQuota(used: quota.used, remaining: quota.remaining, limit: quota.limit, resetKey: quota.resetKey)
                     guard self.reformulationRequestID == token.id else { return }
                 }
 
                 if !quota.allowed {
                     await MainActor.run {
                         self.publishError(message: "回数上限に達しました。プレミアムで無制限にできます。")
-                        if quota.paywall { PaywallCoordinator.shared.present() }
+                        PaywallCoordinator.shared.present()
                     }
                     return
                 }

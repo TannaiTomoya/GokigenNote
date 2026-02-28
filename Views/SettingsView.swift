@@ -6,6 +6,8 @@
 //
 
 import SwiftUI
+import UIKit
+import FirebaseAuth
 
 struct SettingsView: View {
     @ObservedObject var vm: GokigenViewModel
@@ -22,6 +24,22 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             List {
+                // 未ログイン時: ログインボタン（AuthView へ）
+                if !authVM.isAuthenticated {
+                    Section {
+                        Button {
+                            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                            showAuthView = true
+                        } label: {
+                            Label("ログイン", systemImage: "person.crop.circle.badge.plus")
+                        }
+                    } header: {
+                        Text("アカウント")
+                    } footer: {
+                        Text("ログインすると記録をクラウドに保存できます。")
+                    }
+                }
+
                 // ユーザー情報セクション
                 if let user = authVM.currentUser {
                     Section {
@@ -43,6 +61,19 @@ struct SettingsView: View {
                     }
                 }
 
+                // ログアウト（画面上部に表示して見つけやすくする）
+                if authVM.isAuthenticated {
+                    Section {
+                        Button(role: .destructive, action: { showSignOutAlert = true }) {
+                            HStack {
+                                Spacer()
+                                Text("ログアウト")
+                                Spacer()
+                            }
+                        }
+                    }
+                }
+
                 // プレミアム（Root の sheet で同じ PaywallView を表示）
                 Section {
                     Button {
@@ -61,19 +92,26 @@ struct SettingsView: View {
                                         .foregroundStyle(.tertiary)
                                 }
                             }
+                            Image(systemName: "chevron.right")
+                                .font(.caption)
+                                .foregroundStyle(.tertiary)
                         }
+                        .contentShape(Rectangle())
                     }
+                    .buttonStyle(.plain)
                 } header: {
                     Text("課金")
+                } footer: {
+                    Text("タップでプレミアムの申し込み・復元ができます。")
                 }
-                
+
                 // データ管理セクション
                 Section {
                     Button(action: prepareExport) {
                         Label("データを書き出す", systemImage: "square.and.arrow.up")
                     }
                     .disabled(vm.entries.isEmpty)
-                    
+
                     Button(role: .destructive, action: { showDeleteAlert = true }) {
                         Label("すべてのデータを削除", systemImage: "trash")
                     }
@@ -83,7 +121,7 @@ struct SettingsView: View {
                 } footer: {
                     Text("データを書き出すと、すべての記録をJSON形式で共有できます。")
                 }
-                
+
                 // 統計情報セクション
                 Section("統計情報") {
                     HStack {
@@ -92,14 +130,14 @@ struct SettingsView: View {
                         Text("\(vm.entries.count)件")
                             .foregroundStyle(.secondary)
                     }
-                    
+
                     HStack {
                         Text("連続記録日数")
                         Spacer()
                         Text("\(vm.trendSnapshot.consecutiveDays)日")
                             .foregroundStyle(.secondary)
                     }
-                    
+
                     HStack {
                         Text("平均スコア")
                         Spacer()
@@ -107,51 +145,20 @@ struct SettingsView: View {
                             .foregroundStyle(.secondary)
                     }
                 }
-                
-                // アプリ情報セクション
-                Section("法的表示") {
+
+                // 利用規約・プライバシー
+                Section {
                     Button { showTerms = true } label: {
                         Label("利用規約", systemImage: "doc.text")
                     }
                     Button { showPrivacy = true } label: {
                         Label("プライバシーポリシー", systemImage: "hand.raised")
                     }
+                } header: {
+                    Text("法的情報")
                 }
 
-                Section("アプリ情報") {
-                    HStack {
-                        Text("バージョン")
-                        Spacer()
-                        Text("1.0.0")
-                            .foregroundStyle(.secondary)
-                    }
-                    
-                    Link(destination: URL(string: "https://github.com")!) {
-                        HStack {
-                            Text("GitHub")
-                            Spacer()
-                            Image(systemName: "arrow.up.forward.app")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                }
-                
-                // プライバシーセクション
-                Section {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("プライバシーについて")
-                            .font(.headline)
-                        Text("ログイン後、データはFirestoreクラウドに保存されます。「言い換えをつくる」等の機能利用時は、入力テキストがGoogleのAI（Gemini API）に送信され、処理後に結果が返ります。送信データはGoogleのプライバシーポリシーに従って取り扱われます。")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    .padding(.vertical, 4)
-                } header: {
-                    Text("プライバシー")
-                }
-                
-                // 重要な注意事項
+                // 免責
                 Section {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("⚠️ 重要")
@@ -162,28 +169,20 @@ struct SettingsView: View {
                     }
                     .padding(.vertical, 4)
                 }
-                
+
                 // 匿名のときはメール/Googleログインを出せる
                 if case .anonymous = authVM.authState {
                     Section {
-                        Button { showAuthView = true } label: {
+                        Button {
+                            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                            showAuthView = true
+                        } label: {
                             Label("メールでログイン", systemImage: "envelope")
                         }
                     } header: {
                         Text("アカウント")
-                    }
-                }
-
-                // ログアウトセクション
-                if authVM.isAuthenticated {
-                    Section {
-                        Button(role: .destructive, action: { showSignOutAlert = true }) {
-                            HStack {
-                                Spacer()
-                                Text("ログアウト")
-                                Spacer()
-                            }
-                        }
+                    } footer: {
+                        Text("ログイン後、データはFirestoreクラウドに保存されます。「言い換えをつくる」等の機能利用時は、入力テキストがGoogleのAI（Gemini API）に送信され、処理後に結果が返ります。送信データはGoogleのプライバシーポリシーに従って取り扱われます。")
                     }
                 }
             }
@@ -218,17 +217,16 @@ struct SettingsView: View {
             AuthView(authVM: authVM)
         }
     }
-    
+
     // MARK: - Helper Functions
-    
+
     private func prepareExport() {
         guard let json = vm.exportEntriesJSON() else { return }
         exportText = json
         isSharePresented = true
     }
-    
+
     private func deleteAllData() {
         vm.deleteAllEntries()
     }
 }
-

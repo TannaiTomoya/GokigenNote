@@ -5,45 +5,8 @@
 //  Drop-in flow: Input → Result → Copy → (optional) Paywall
 //
 
-import SwiftUI
 import Combine
-
-// MARK: - Models
-
-enum LineStopperRisk: Int, Comparable {
-    case low = 0, medium = 1, high = 2
-    static func < (lhs: LineStopperRisk, rhs: LineStopperRisk) -> Bool { lhs.rawValue < rhs.rawValue }
-
-    var title: String {
-        switch self {
-        case .low: return "LOW"
-        case .medium: return "MEDIUM"
-        case .high: return "HIGH"
-        }
-    }
-
-    var emoji: String {
-        switch self {
-        case .low: return "🟢"
-        case .medium: return "🟠"
-        case .high: return "🔴"
-        }
-    }
-
-    var oneLiner: String {
-        switch self {
-        case .low: return "このまま送っても大崩れしにくい。"
-        case .medium: return "刺さり方が強い。少し丸めると安全。"
-        case .high: return "あとで後悔しやすい。送信前に止めよう。"
-        }
-    }
-}
-
-struct LineStopperSuggestion: Identifiable, Hashable {
-    let id = UUID()
-    let label: String
-    let text: String
-}
+import SwiftUI
 
 // MARK: - ViewModel
 
@@ -83,7 +46,8 @@ final class LineStopperViewModel: ObservableObject {
 
         // Functions lineStopper（サーバでレート制限 + Gemini）。補助輪としてクライアント側キャッシュ・クールダウンあり
         do {
-            let (riskRaw, oneLiner, suggestionTuples) = try await GeminiService.shared.generateLineStopperResult(text: trimmed)
+            let (riskRaw, oneLiner, suggestionTuples) = try await GeminiService.shared
+                .generateLineStopperResult(text: trimmed)
 
             let mappedRisk: LineStopperRisk
             switch riskRaw.uppercased() {
@@ -93,7 +57,9 @@ final class LineStopperViewModel: ObservableObject {
             }
             risk = mappedRisk
             riskOneLiner = oneLiner.isEmpty ? nil : oneLiner
-            suggestions = suggestionTuples.map { LineStopperSuggestion(label: $0.label, text: $0.text) }
+            suggestions = suggestionTuples.map {
+                LineStopperSuggestion(label: $0.label, text: $0.text)
+            }
             selectedSuggestion = suggestions.first
         } catch {
             if QuotaService.isUnauthenticated(error) {
@@ -102,7 +68,9 @@ final class LineStopperViewModel: ObservableObject {
                 errorMessage = "しばらく待ってからお試しください。"
             } else {
                 let raw = error.localizedDescription
-                if raw.contains("NOT FOUND") || raw.lowercased().contains("not found") || raw.contains("404") {
+                if raw.contains("NOT FOUND") || raw.lowercased().contains("not found")
+                    || raw.contains("404")
+                {
                     errorMessage = "危険度チェックは一時的に利用できません。しばらくしてからお試しください。"
                 } else {
                     errorMessage = raw
@@ -146,16 +114,16 @@ struct LineStopperInputView: View {
     private var canUseButton: Bool {
         switch authVM.authState {
         case .signedIn, .anonymous: return true
-        default: return false
+        case .signedOut, .inProgress, .unknown, .failed: return false
         }
     }
 
     private var buttonLabel: String {
         switch authVM.authState {
         case .inProgress, .unknown: return "準備中…"
-        case .signedOut: return "ログインしてください"
         case .failed: return "危険度をチェックする"
         case .signedIn, .anonymous: return "危険度をチェックする"
+        case .signedOut: return "ログインしてください"
         }
     }
 
@@ -193,7 +161,8 @@ struct LineStopperInputView: View {
                 }
 
             if let err = vm.errorMessage {
-                Text(err).font(.caption).foregroundStyle(.red).frame(maxWidth: .infinity, alignment: .leading)
+                Text(err).font(.caption).foregroundStyle(.red).frame(
+                    maxWidth: .infinity, alignment: .leading)
             }
 
             Button {
@@ -210,7 +179,9 @@ struct LineStopperInputView: View {
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
-            .disabled(!canUseButton || vm.isLoading || vm.inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            .disabled(
+                !canUseButton || vm.isLoading
+                    || vm.inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
 
             quotaRow
 
@@ -231,7 +202,7 @@ struct LineStopperInputView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("そのLINE、あとで後悔するよ")
                 .font(.title3.weight(.bold))
-            Text("送信前に一回だけ止める。危険度と“安全な一言”に変換します。")
+            Text("送信前に一回だけ止める。危険度と\u{201C}安全な一言\u{201D}に変換します。")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
         }

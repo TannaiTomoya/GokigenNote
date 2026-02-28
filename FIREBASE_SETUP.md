@@ -146,7 +146,27 @@ Xcode で Info.plist を開き、以下を追加：
 2. Product → Clean Build Folder (⌥⇧⌘K)
 3. 再ビルド
 
-### Google Sign-In が動作しない
+### 匿名ログインで「This operation is restricted to administrators only」（Code=17085）
+
+- **原因**: Firebase の匿名認証が無効、または管理者制限がかかっている。
+- **対処**:
+  1. [Firebase Console](https://console.firebase.google.com/) → 対象プロジェクト
+  2. **Authentication** → **Sign-in method**
+  3. **匿名** を選択 → **有効にする** を ON → 保存
+
+### Google ログインで about:blank の白い画面が出る
+
+- **原因**: OAuth のリダイレクトが正しく処理されていない、または Firebase/Google Cloud の設定不備。
+- **対処**:
+  1. **Firebase Console**: Authentication → Sign-in method → **Google** が有効で、プロジェクトのサポートメールが設定されているか確認。
+  2. **GoogleService-Info.plist**: プロジェクトに正しく追加され、**REVERSED_CLIENT_ID** が含まれているか確認。
+  3. **Info.plist（URL Types）**: URL Schemes に `REVERSED_CLIENT_ID` の値（例: `com.googleusercontent.apps.xxxxx`）が **1つ** だけ登録されているか確認。Xcode のターゲット → Info → URL Types で確認。
+  4. **Google Cloud Console**: [API とサービス] → [認証情報] で、該当プロジェクトの **OAuth 2.0 クライアント ID**（iOS タイプ）が存在し、バンドル ID が `com.tomoya.tannnai.GokigenNote` と一致しているか確認。
+  5. **OAuth リダイレクトの受け取り**（未実装だと about:blank のままになりやすい）:
+     - **方法A**: プロジェクトに `Services/AuthURLHandler.swift` を追加済み。`@main` の App に `@UIApplicationDelegateAdaptor(AppDelegateForAuth.self) var delegate` を追加すると、Google ログイン後のリダイレクトを `Auth.auth().canHandle(url)` で処理できます。
+     - **方法B**: SwiftUI のみの場合は、ルートの `WindowGroup` に `.onOpenURL { url in _ = Auth.auth().canHandle(url) }` を追加する。
+
+### Google Sign-In が動作しない（一般）
 
 1. `GoogleService-Info.plist` が正しく追加されているか確認
 2. Info.plist の URL Schemes が正しいか確認

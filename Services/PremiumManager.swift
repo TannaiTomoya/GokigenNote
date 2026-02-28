@@ -173,6 +173,8 @@ final class PremiumManager: ObservableObject {
     @Published private(set) var lastError: String?
     /// true になるまでゲート判定しない（誤爆防止）
     @Published private(set) var entitlementsLoaded = false
+    /// サーバー（consumeRewrite）から返った残り回数。表示をサーバーと一致させるために使う。
+    @Published private(set) var lastServerQuota: (remaining: Int, limit: Int, resetKey: String)?
 
     private var ownedProductIDs: Set<String> = []
     private var updatesTask: Task<Void, Never>?
@@ -205,6 +207,7 @@ final class PremiumManager: ObservableObject {
     func setCurrentUserId(_ id: String?) {
         guard currentUserId != id else { return }
         currentUserId = id
+        lastServerQuota = nil
         if id != nil {
             if let raw = UserDefaults.standard.string(forKey: planCacheKey),
                let p = Plan.from(cacheValue: raw) {
@@ -242,6 +245,7 @@ final class PremiumManager: ObservableObject {
         ownedProductIDs = []
         plan = .free
         entitlementsLoaded = false
+        lastServerQuota = nil
     }
 
     /// App起動時に1回だけ呼ぶ想定
@@ -577,11 +581,11 @@ extension PremiumManager {
     private var defaults: UserDefaults { .standard }
 
     private func dayQuotaKey(_ date: Date = .now) -> String {
-        "quota.rewrite.day.\(UsageKey.dayKey(date))"
+        "quota.rewrite.day.\(currentUserId ?? "guest").\(UsageKey.dayKey(date))"
     }
 
     private func monthQuotaKey(_ date: Date = .now) -> String {
-        "quota.rewrite.month.\(UsageKey.monthKey(date))"
+        "quota.rewrite.month.\(currentUserId ?? "guest").\(UsageKey.monthKey(date))"
     }
 
     /// 共通枠（言い換え/共感生成の合算）を使えるか。plan 単一の真実
@@ -619,10 +623,30 @@ extension PremiumManager {
         }
     }
 
-    /// 表示用（共通枠の残り）。plan 単一の真実
+    /// consumeRewrite のレスポンスで呼ぶ。表示用の残り回数をサーバー基準に同期する。
+    @MainActor
+    func applyServerQuota(used: Int, remaining: Int, limit: Int, resetKey: String) {
+        guard !resetKey.isEmpty, limit > 0 else { return }
+        lastServerQuota = (remaining: remaining, limit: limit, resetKey: resetKey)
+        let uid = currentUserId ?? "guest"
+        switch plan {
+        case .free:
+            defaults.set(used, forKey: "quota.rewrite.day.\(uid).\(resetKey)")
+        case .lifetime:
+            defaults.set(used, forKey: "quota.rewrite.month.\(uid).\(resetKey)")
+        case .subscription:
+            break
+        }
+    }
+
+    /// 表示用（共通枠の残り）。サーバー結果を優先し、なければローカル。
     var remainingRewriteQuotaText: String {
         let p = plan
         guard let limit = p.rewriteLimit else { return "無制限" }
+
+        if let q = lastServerQuota, q.limit == limit {
+            return p == .free ? "本日あと\(max(0, q.remaining))回" : "今月あと\(max(0, q.remaining))回"
+        }
 
         switch p {
         case .free:

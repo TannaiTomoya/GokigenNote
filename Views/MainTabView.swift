@@ -56,20 +56,24 @@ struct MainTabView: View {
         }
         .task(id: authVM.uid ?? "nil") {
             guard let uid = authVM.uid else {
+                await PremiumManager.shared.setCurrentUserId(nil)
                 vm.clearUserId()
                 trainingVM.clearUserId()
                 return
             }
             print("✅ setUserId:", uid)
+            await PremiumManager.shared.setCurrentUserId(uid)
             vm.authViewModel = authVM
             vm.setUserId(uid)
             trainingVM.setUserId(uid)
         }
         .onChange(of: authVM.uid) { _, newUID in
             if let uid = newUID {
+                Task { await PremiumManager.shared.setCurrentUserId(uid) }
                 vm.setUserId(uid)
                 trainingVM.setUserId(uid)
             } else {
+                Task { await PremiumManager.shared.setCurrentUserId(nil) }
                 vm.clearUserId()
                 trainingVM.clearUserId()
             }

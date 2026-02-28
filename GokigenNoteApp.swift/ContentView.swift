@@ -42,6 +42,20 @@ struct TodayView: View {
                     Text("AI枠: \(premium.remainingRewriteQuotaText)")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                    if !premium.effectivePlan.isPremium && premium.remainingRewriteQuotaText.contains("あと0回") {
+                        Button {
+                            PaywallCoordinator.shared.present()
+                        } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: "crown.fill")
+                                    .font(.caption)
+                                Text("プレミアムで無制限に使う")
+                                    .font(.caption)
+                            }
+                            .foregroundStyle(.accentColor)
+                        }
+                        .buttonStyle(.plain)
+                    }
                     if let error = premium.lastError {
                         Text(error)
                             .font(.caption)
