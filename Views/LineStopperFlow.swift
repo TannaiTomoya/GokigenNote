@@ -3,6 +3,7 @@
 //  GokigenNote
 //
 //  Drop-in flow: Input → Result → Copy → (optional) Paywall
+//  型定義（LineStopperRisk, LineStopperSuggestion）は LineStopperTypes.swift にのみあること。ここに Models を追加すると二重定義でエラーになる。
 //
 
 import Combine

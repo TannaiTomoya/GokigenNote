@@ -52,7 +52,7 @@ struct TodayView: View {
                                 Text("プレミアムで無制限に使う")
                                     .font(.caption)
                             }
-                            .foregroundStyle(.accentColor)
+                            .foregroundStyle(Color.accentColor)
                         }
                         .buttonStyle(.plain)
                     }
@@ -163,7 +163,7 @@ struct TodayView: View {
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 20)
                     .background(speechInput.state == .recording ? Color.red.opacity(0.15) : Color.accentColor.opacity(0.15), in: RoundedRectangle(cornerRadius: 16))
-                    .foregroundStyle(speechInput.state == .recording ? .red : .accentColor)
+                    .foregroundStyle(speechInput.state == .recording ? Color.red : Color.accentColor)
                 }
                 .buttonStyle(PlainButtonStyle())
                 .disabled(speechInput.state == .processing)

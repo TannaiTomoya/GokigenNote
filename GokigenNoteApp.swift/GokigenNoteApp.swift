@@ -3,9 +3,11 @@
 //  GokigenNote
 //
 //  ルート: signedOut のとき AuthView、それ以外は MainTabView。
+//  OAuth リダイレクトは .onOpenURL で Firebase Auth に渡す。
 //
 
 import SwiftUI
+import FirebaseAuth
 
 @main
 struct GokigenNoteApp: App {
@@ -19,6 +21,9 @@ struct GokigenNoteApp: App {
                 } else {
                     MainTabView(authVM: authVM)
                 }
+            }
+            .onOpenURL { url in
+                _ = Auth.auth().canHandle(url)
             }
         }
     }
