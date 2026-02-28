@@ -153,6 +153,7 @@ struct LineStopperInputView: View {
     private var buttonLabel: String {
         switch authVM.authState {
         case .inProgress, .unknown: return "準備中…"
+        case .signedOut: return "ログインしてください"
         case .failed: return "危険度をチェックする"
         case .signedIn, .anonymous: return "危険度をチェックする"
         }
