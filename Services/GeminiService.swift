@@ -163,11 +163,11 @@ final class GeminiService {
     }
 
     /// 言い換え: Functions の reformulate を呼ぶ（キーはサーバ側のみ・アプリに渡さない）
-    func reformulateText(for text: String, context: ReformulationContext) async throws -> String {
+    func reformulateText(for text: String, context: ReformulationContext) async throws -> (result: String, isFallback: Bool) {
         logger.info("Requesting text reformulation via Functions...")
-        let result = try await ReformulateRemoteService.shared.reformulate(text: text, context: context)
+        let tuple = try await ReformulateRemoteService.shared.reformulate(text: text, context: context)
         logger.info("Text reformulation completed.")
-        return result
+        return tuple
     }
 
     /// 地雷LINEストッパー: キャッシュ → レート制限（補助輪）→ Functions lineStopper 呼び出し（キー・RPM はサーバ）。返却に queueTier を含む。

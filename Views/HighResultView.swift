@@ -33,6 +33,7 @@ struct HighResultView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
+            riskLevelBar
             alertBar
             recommendedCard
             otherSuggestionsSection
@@ -59,6 +60,25 @@ struct HighResultView: View {
             }
         }
         .animation(.easeInOut(duration: 0.2), value: showCopyToast)
+    }
+
+    private var riskLevelBar: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Text(LineStopperRisk.high.emoji)
+                Text("危険度：\(LineStopperRisk.high.title)")
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+            }
+            if vm.lastQueueTier == "priority" {
+                Text("優先処理でチェックしました")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Color.orange.opacity(0.15), in: RoundedRectangle(cornerRadius: 10))
     }
 
     // 上部：危険アラートバー
@@ -305,6 +325,7 @@ struct LowResultView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
+            riskLevelBar
             safeMessageBar
             recommendedBlock
             otherSuggestionsSection
@@ -331,6 +352,25 @@ struct LowResultView: View {
             }
         }
         .animation(.easeInOut(duration: 0.2), value: showCopyToast)
+    }
+
+    private var riskLevelBar: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Text(LineStopperRisk.low.emoji)
+                Text("危険度：\(LineStopperRisk.low.title)")
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+            }
+            if vm.lastQueueTier == "priority" {
+                Text("優先処理でチェックしました")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Color.green.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
     }
 
     private var safeMessageBar: some View {
@@ -447,6 +487,7 @@ struct MediumResultView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
+            riskLevelBar
             cautionMessageBar
             suggestionPicker
             copyAndClearRow
@@ -472,6 +513,25 @@ struct MediumResultView: View {
             }
         }
         .animation(.easeInOut(duration: 0.2), value: showCopyToast)
+    }
+
+    private var riskLevelBar: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Text(LineStopperRisk.medium.emoji)
+                Text("危険度：\(LineStopperRisk.medium.title)")
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+            }
+            if vm.lastQueueTier == "priority" {
+                Text("優先処理でチェックしました")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
     }
 
     private var cautionMessageBar: some View {

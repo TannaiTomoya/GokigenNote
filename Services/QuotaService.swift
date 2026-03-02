@@ -68,13 +68,21 @@ final class QuotaService {
 
         let allowed = (dict["allowed"] as? Bool) ?? false
         let plan = (dict["plan"] as? String) ?? "free"
-        let limit = (dict["limit"] as? Int) ?? 0
-        let used = (dict["used"] as? Int) ?? 0
-        let remaining = (dict["remaining"] as? Int) ?? 0
-        let resetKey = (dict["resetKey"] as? String) ?? ""
+        // サーバーは RateLimitDetails で daily: { limit, used, remaining, resetAtMs } を返す
+        let daily = dict["daily"] as? [String: Any]
+        let limit = (daily?["limit"] as? Int) ?? (dict["limit"] as? Int) ?? 0
+        let used = (daily?["used"] as? Int) ?? (dict["used"] as? Int) ?? 0
+        let remaining = (daily?["remaining"] as? Int) ?? (dict["remaining"] as? Int) ?? 0
+        let resetAtMsVal = daily?["resetAtMs"]
+        let resetKey: String = {
+            if let i = resetAtMsVal as? Int { return "\(i)" }
+            if let d = resetAtMsVal as? Double { return "\(Int(d))" }
+            return (dict["resetKey"] as? String) ?? ""
+        }()
         let reason = dict["reason"] as? String
-        let paywall = (dict["paywall"] as? Bool) ?? false
-        let cooldownRemainingSeconds = dict["cooldownRemainingSeconds"] as? Int
+        let paywall = (dict["paywall"] as? Bool) ?? (!allowed && reason != nil)
+        let rawRetry = dict["retryAfterSeconds"] ?? dict["cooldownRemainingSeconds"]
+        let cooldownRemainingSeconds: Int? = (rawRetry as? Int) ?? (rawRetry as? Double).map { Int($0) }
 
         return QuotaCheckResult(
             allowed: allowed,

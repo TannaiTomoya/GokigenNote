@@ -9,8 +9,9 @@
 import Combine
 import FirebaseAuth
 import SwiftUI
+
 #if os(iOS)
-import UIKit
+    import UIKit
 #endif
 
 // MARK: - ViewModel
@@ -169,17 +170,24 @@ final class LineStopperViewModel: ObservableObject {
             }
         } catch {
             if hasCancelledWaiting { return }
-            if CongestionGateHandler.presentIfNeeded(error: error, op: .lineStopper, payloadKey: trimmed) {
+            if CongestionGateHandler.presentIfNeeded(
+                error: error, op: .lineStopper, payloadKey: trimmed)
+            {
                 return
             }
             if QuotaService.isUnauthenticated(error) {
                 errorMessage = "接続を確認して再試行してください。"
             } else {
                 let raw = error.localizedDescription
+                let ns = error as NSError
+                let isInternal = raw.uppercased().contains("INTERNAL")
+                    || (ns.domain == "FunctionsErrorDomain" && ns.code == 13)
                 if raw.contains("NOT FOUND") || raw.lowercased().contains("not found")
-                    || raw.contains("404")
+                    || raw.contains("404") || isInternal
                 {
                     errorMessage = "危険度チェックは一時的に利用できません。しばらくしてからお試しください。"
+                } else if QuotaService.isResourceExhausted(error) {
+                    errorMessage = "本日の回数を使い切りました。明日またお試しください。"
                 } else {
                     errorMessage = raw
                 }
@@ -190,14 +198,16 @@ final class LineStopperViewModel: ObservableObject {
     func copySelected() {
         guard let text = selectedSuggestion?.text else { return }
         #if os(iOS)
-        UIPasteboard.general.string = text
+            UIPasteboard.general.string = text
         #endif
         if let uid = Auth.auth().currentUser?.uid,
-           let checkId = lastCheckId,
-           let suggestion = selectedSuggestion,
-           let idx = suggestions.firstIndex(where: { $0.id == suggestion.id }) {
+            let checkId = lastCheckId,
+            let suggestion = selectedSuggestion,
+            let idx = suggestions.firstIndex(where: { $0.id == suggestion.id })
+        {
             Task {
-                await LineCheckLogger.shared.logCopy(uid: uid, checkId: checkId, label: suggestion.label, index: idx)
+                await LineCheckLogger.shared.logCopy(
+                    uid: uid, checkId: checkId, label: suggestion.label, index: idx)
             }
         }
     }
@@ -206,7 +216,8 @@ final class LineStopperViewModel: ObservableObject {
     func recordCopy(label: String, index: Int) {
         guard let uid = Auth.auth().currentUser?.uid, let checkId = lastCheckId else { return }
         Task {
-            await LineCheckLogger.shared.logCopy(uid: uid, checkId: checkId, label: label, index: index)
+            await LineCheckLogger.shared.logCopy(
+                uid: uid, checkId: checkId, label: label, index: index)
         }
     }
 }
@@ -237,7 +248,8 @@ struct LineStopperRootView: View {
         }
         .overlay {
             if vm.isLoading {
-                LineStopperWaitingGate(queueTier: remote.lastQueueTier.rawValue, isLoading: $vm.isLoading)
+                LineStopperWaitingGate(
+                    queueTier: remote.lastQueueTier.rawValue, isLoading: $vm.isLoading)
             } else if pm.isLoading {
                 LoadingOverlay(isLoading: true)
             }
@@ -318,8 +330,12 @@ struct LineStopperInputView: View {
                     .foregroundStyle(.secondary)
 
                 if let err = vm.errorMessage {
-                    Text(err).font(.caption).foregroundStyle(.red).frame(
-                        maxWidth: .infinity, alignment: .leading)
+                    Text(err)
+                        .font(.subheadline)
+                        .foregroundStyle(.red)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(10)
+                        .background(Color.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
                 }
 
                 Button {
@@ -364,7 +380,8 @@ struct LineStopperInputView: View {
             .padding()
             .contentShape(Rectangle())
             .onTapGesture {
-                UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                UIApplication.shared.sendAction(
+                    #selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
             }
         }
         .scrollDismissesKeyboard(.interactively)
@@ -372,7 +389,8 @@ struct LineStopperInputView: View {
             ToolbarItemGroup(placement: .keyboard) {
                 Spacer()
                 Button("完了") {
-                    UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                    UIApplication.shared.sendAction(
+                        #selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
                 }
             }
         }
@@ -391,13 +409,20 @@ struct LineStopperInputView: View {
     }
 
     private var quotaRow: some View {
-        HStack {
-            Text("現在: \(PremiumManager.shared.effectivePlan.displayName)")
-            Spacer()
-            Text("AI枠: \(PremiumManager.shared.remainingRewriteQuotaText)")
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text("現在: \(PremiumManager.shared.effectivePlan.displayName)")
+                Spacer()
+                Text("AI枠: \(PremiumManager.shared.remainingRewriteQuotaText)")
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            if !PremiumManager.shared.effectivePlan.isPremium {
+                Text("無料で1日10回まで利用できます")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
         }
-        .font(.caption)
-        .foregroundStyle(.secondary)
     }
 }
 
@@ -572,4 +597,3 @@ private struct LoadingOverlay: View {
         }
     }
 }
-

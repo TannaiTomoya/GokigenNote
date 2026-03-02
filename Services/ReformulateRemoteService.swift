@@ -16,7 +16,8 @@ final class ReformulateRemoteService {
     private init() {}
 
     /// サーバで Gemini 言い換え。キーはアプリに持たせない。
-    func reformulate(text: String, context: ReformulationContext) async throws -> String {
+    /// - Returns: 言い換え結果。サーバが Gemini 失敗でフォールバックした場合は入力文がそのまま返る。
+    func reformulate(text: String, context: ReformulationContext) async throws -> (result: String, isFallback: Bool) {
         let tier = PremiumManager.shared.queueTier.rawValue
         let params: [String: Any] = [
             "text": text,
@@ -34,7 +35,8 @@ final class ReformulateRemoteService {
               let resultText = data["text"] as? String else {
             throw NSError(domain: "ReformulateRemoteService", code: -1, userInfo: [NSLocalizedDescriptionKey: "Invalid response"])
         }
-        return resultText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let isFallback = (data["fallback"] as? Bool) ?? false
+        return (resultText.trimmingCharacters(in: .whitespacesAndNewlines), isFallback)
     }
 }
 

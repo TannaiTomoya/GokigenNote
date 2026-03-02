@@ -12,12 +12,12 @@ struct QuotaExceededView: View {
 
     var body: some View {
         VStack(spacing: 24) {
-            Text("そのLINE、このまま送ると危険です")
+            Text("本日の無料分を使い切りました")
                 .font(.headline)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal)
 
-            Text("あと1回だけ改善できます。\nそれ以降はプレミアムが必要です。")
+            Text("明日になるとまた使えます。\nプレミアムなら1日あたりの回数制限がありません。")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -26,7 +26,7 @@ struct QuotaExceededView: View {
                 Button(action: {
                     coordinator.dismissQuotaExceeded()
                 }) {
-                    Text("今はやめる")
+                    Text("明日また使う")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.bordered)
@@ -35,7 +35,7 @@ struct QuotaExceededView: View {
                     coordinator.dismissQuotaExceeded()
                     coordinator.present()
                 }) {
-                    Text("続きを見る")
+                    Text("プレミアムを見る")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)

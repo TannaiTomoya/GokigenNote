@@ -43,6 +43,11 @@ struct TodayView: View {
                     Text("AI枠: \(premium.remainingRewriteQuotaText)")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                    if !premium.effectivePlan.isPremium {
+                        Text("無料で1日10回まで利用できます")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                    }
                     if !premium.effectivePlan.isPremium && premium.remainingRewriteQuotaText.contains("あと0回") {
                         Button {
                             PaywallCoordinator.shared.present()

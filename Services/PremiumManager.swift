@@ -6,12 +6,12 @@
 //  共通枠（rewriteQuota）で言い換え・共感を合算。
 //
 
-import Foundation
-import StoreKit
 import Combine
-import SwiftUI
-import OSLog
 import FirebaseFunctions
+import Foundation
+import OSLog
+import StoreKit
+import SwiftUI
 
 enum SubscriptionType: Equatable {
     case monthly
@@ -230,7 +230,8 @@ final class PremiumManager: ObservableObject {
         lastServerQuota = nil
         if id != nil {
             if let raw = UserDefaults.standard.string(forKey: planCacheKey),
-               let p = Plan.from(cacheValue: raw) {
+                let p = Plan.from(cacheValue: raw)
+            {
                 plan = p
                 entitlementsLoaded = true
             } else {
@@ -276,7 +277,8 @@ final class PremiumManager: ObservableObject {
         hasStarted = true
 
         if let cached = UserDefaults.standard.string(forKey: planCacheKey),
-           let restored = Plan.from(cacheValue: cached) {
+            let restored = Plan.from(cacheValue: cached)
+        {
             plan = restored
             entitlementsLoaded = true
         }
@@ -300,13 +302,16 @@ final class PremiumManager: ObservableObject {
         lastError = nil
         do {
             let ids = Array(ProductID.all)
-            log.info("loadProducts bundleId=\(Bundle.main.bundleIdentifier ?? "nil", privacy: .public)")
+            log.info(
+                "loadProducts bundleId=\(Bundle.main.bundleIdentifier ?? "nil", privacy: .public)")
             log.info("loadProducts ids=\(ids.joined(separator: ","), privacy: .public)")
 
             let storeProducts = try await Product.products(for: ids)
 
             log.info("loadProducts resultCount=\(storeProducts.count, privacy: .public)")
-            log.info("loadProducts resultIds=\(storeProducts.map { $0.id }.joined(separator: ","), privacy: .public)")
+            log.info(
+                "loadProducts resultIds=\(storeProducts.map { $0.id }.joined(separator: ","), privacy: .public)"
+            )
             self.availableProducts = storeProducts
         } catch {
             let msg = String(describing: error)
@@ -334,7 +339,9 @@ final class PremiumManager: ObservableObject {
                     try await AppStore.sync()
                     log.info("AppStore.sync after purchase ok")
                 } catch {
-                    log.error("AppStore.sync after purchase failed: \(error.localizedDescription, privacy: .public)")
+                    log.error(
+                        "AppStore.sync after purchase failed: \(error.localizedDescription, privacy: .public)"
+                    )
                 }
                 await refreshEntitlements(mode: .userInitiated)
 
@@ -408,8 +415,12 @@ final class PremiumManager: ObservableObject {
         while true {
             pendingEntitlementsRefresh = false
 
-            let cached = Plan.from(cacheValue: UserDefaults.standard.string(forKey: planCacheKey) ?? "") ?? .free
-            log.debug("refreshEntitlements start mode=\(String(describing: mode), privacy: .public) cached=\(cached.cacheValue, privacy: .public) current=\(self.plan.cacheValue, privacy: .public) products=\(self.availableProducts.count, privacy: .public) loaded=\(self.entitlementsLoaded, privacy: .public)")
+            let cached =
+                Plan.from(cacheValue: UserDefaults.standard.string(forKey: planCacheKey) ?? "")
+                ?? .free
+            log.debug(
+                "refreshEntitlements start mode=\(String(describing: mode), privacy: .public) cached=\(cached.cacheValue, privacy: .public) current=\(self.plan.cacheValue, privacy: .public) products=\(self.availableProducts.count, privacy: .public) loaded=\(self.entitlementsLoaded, privacy: .public)"
+            )
 
             var newOwned: Set<String> = []
             var jwsList: [String] = []
@@ -424,7 +435,9 @@ final class PremiumManager: ObservableObject {
                     jwsList.append(result.jwsRepresentation)
                 } catch {
                     verifyFailedCount += 1
-                    log.error("verify failed in currentEntitlements: \(error.localizedDescription, privacy: .public)")
+                    log.error(
+                        "verify failed in currentEntitlements: \(error.localizedDescription, privacy: .public)"
+                    )
                     continue
                 }
             }
@@ -436,7 +449,9 @@ final class PremiumManager: ObservableObject {
                 let didApplyServer = await syncEntitlementsToServer(transactions: jwsList)
                 if didApplyServer {
                     entitlementsLoaded = true
-                    log.info("PLAN: \(self.plan.cacheValue, privacy: .public) OWNED: \(Array(self.ownedProductIDs).sorted().joined(separator: ","), privacy: .public) MODE: server_applied")
+                    log.info(
+                        "PLAN: \(self.plan.cacheValue, privacy: .public) OWNED: \(Array(self.ownedProductIDs).sorted().joined(separator: ","), privacy: .public) MODE: server_applied"
+                    )
                     if pendingEntitlementsRefresh {
                         log.debug("pendingEntitlementsRefresh -> rerun once")
                         continue
@@ -448,21 +463,30 @@ final class PremiumManager: ObservableObject {
                     lastError = "サーバーへの反映に失敗しました。しばらくしてから「購入を復元」をお試しください。"
                 }
             } else {
-                log.info("JWS count: 0 reason: server_sync_skipped (no jwsRepresentation or no entitlements)")
+                log.info(
+                    "JWS count: 0 reason: server_sync_skipped (no jwsRepresentation or no entitlements)"
+                )
             }
 
             // サーバー未適用時：最後に成功したサーバー状態を使う（通信失敗で premium→free にならないように）
             if let lastPlanRaw = UserDefaults.standard.string(forKey: lastKnownServerPlanKey),
-               let lastPlan = Plan.from(cacheValue: lastPlanRaw) {
-                let lastOwnedRaw = UserDefaults.standard.string(forKey: lastKnownServerOwnedKey) ?? ""
-                let lastOwned = lastOwnedRaw.isEmpty ? Set<String>() : Set(lastOwnedRaw.split(separator: ",").map { String($0) })
-                let tierRaw = UserDefaults.standard.string(forKey: lastKnownServerQueueTierKey) ?? "standard"
+                let lastPlan = Plan.from(cacheValue: lastPlanRaw)
+            {
+                let lastOwnedRaw =
+                    UserDefaults.standard.string(forKey: lastKnownServerOwnedKey) ?? ""
+                let lastOwned =
+                    lastOwnedRaw.isEmpty
+                    ? Set<String>() : Set(lastOwnedRaw.split(separator: ",").map { String($0) })
+                let tierRaw =
+                    UserDefaults.standard.string(forKey: lastKnownServerQueueTierKey) ?? "standard"
                 self.queueTier = QueueTier(rawValue: tierRaw) ?? .standard
                 self.plan = lastPlan
                 self.ownedProductIDs = lastOwned
                 UserDefaults.standard.set(lastPlan.cacheValue, forKey: planCacheKey)
                 entitlementsLoaded = true
-                log.info("PLAN: \(self.plan.cacheValue, privacy: .public) queueTier=\(self.queueTier.rawValue, privacy: .public) OWNED: lastKnownServer fallback count=\(lastOwned.count, privacy: .public)")
+                log.info(
+                    "PLAN: \(self.plan.cacheValue, privacy: .public) queueTier=\(self.queueTier.rawValue, privacy: .public) OWNED: lastKnownServer fallback count=\(lastOwned.count, privacy: .public)"
+                )
                 if pendingEntitlementsRefresh {
                     log.debug("pendingEntitlementsRefresh -> rerun once")
                     continue
@@ -471,9 +495,8 @@ final class PremiumManager: ObservableObject {
             }
 
             let entitlementsLooksHealthy =
-                verifyFailedCount == 0 &&
-                lastError == nil &&
-                (!availableProducts.isEmpty || mode == .userInitiated)
+                verifyFailedCount == 0 && lastError == nil
+                && (!availableProducts.isEmpty || mode == .userInitiated)
 
             let canApply = shouldApplyEntitlementsResult(
                 newOwned: newOwned,
@@ -490,13 +513,19 @@ final class PremiumManager: ObservableObject {
                 plan = resolvePlan(from: newOwned)
                 UserDefaults.standard.set(plan.cacheValue, forKey: planCacheKey)
                 if old.cacheValue != self.plan.cacheValue {
-                    log.info("plan changed: \(old.cacheValue, privacy: .public) -> \(self.plan.cacheValue, privacy: .public)")
+                    log.info(
+                        "plan changed: \(old.cacheValue, privacy: .public) -> \(self.plan.cacheValue, privacy: .public)"
+                    )
                 }
             } else {
-                log.info("refreshEntitlements skipped apply. mode=\(String(describing: mode), privacy: .public) newOwnedEmpty=\(newOwned.isEmpty, privacy: .public) healthy=\(entitlementsLooksHealthy, privacy: .public)")
+                log.info(
+                    "refreshEntitlements skipped apply. mode=\(String(describing: mode), privacy: .public) newOwnedEmpty=\(newOwned.isEmpty, privacy: .public) healthy=\(entitlementsLooksHealthy, privacy: .public)"
+                )
             }
 
-            log.info("PLAN: \(self.plan.cacheValue, privacy: .public) OWNED: \(Array(self.ownedProductIDs).sorted().joined(separator: ","), privacy: .public) MODE: \(String(describing: mode), privacy: .public) HEALTHY: \(entitlementsLooksHealthy, privacy: .public) APPLIED: \(canApply, privacy: .public)")
+            log.info(
+                "PLAN: \(self.plan.cacheValue, privacy: .public) OWNED: \(Array(self.ownedProductIDs).sorted().joined(separator: ","), privacy: .public) MODE: \(String(describing: mode), privacy: .public) HEALTHY: \(entitlementsLooksHealthy, privacy: .public) APPLIED: \(canApply, privacy: .public)"
+            )
 
             if pendingEntitlementsRefresh {
                 log.debug("pendingEntitlementsRefresh -> rerun once")
@@ -531,15 +560,20 @@ final class PremiumManager: ObservableObject {
             let acceptedCount = data["acceptedCount"] as? Int ?? -1
             let activeCount = data["activeCount"] as? Int ?? -1
             let effectiveUntil = data["effectiveUntil"] as? NSNumber
-            let syncMsg = "syncEntitlements response ok=\(data["ok"] as? Bool ?? false) plan=\(data["plan"] as? String ?? "?") reason=\(reason) verifiedJwsCount=\(verifiedJwsCount) acceptedCount=\(acceptedCount) activeCount=\(activeCount) effectiveUntil=\(effectiveUntil?.stringValue ?? "null")"
+            let syncMsg =
+                "syncEntitlements response ok=\(data["ok"] as? Bool ?? false) plan=\(data["plan"] as? String ?? "?") reason=\(reason) verifiedJwsCount=\(verifiedJwsCount) acceptedCount=\(acceptedCount) activeCount=\(activeCount) effectiveUntil=\(effectiveUntil?.stringValue ?? "null")"
             log.info("\(syncMsg, privacy: .public)")
             guard (data["ok"] as? Bool) == true else {
                 await MainActor.run { lastError = "プレミアム反映に失敗しました。復元をお試しください。" }
                 return false
             }
             await MainActor.run { lastError = nil }
-            guard let planStr = data["plan"] as? String, let serverPlan = Plan.from(serverValue: planStr) else {
-                log.info("syncEntitlements ok but plan parse failed: \(data["plan"] as? String ?? "?", privacy: .public)")
+            guard let planStr = data["plan"] as? String,
+                let serverPlan = Plan.from(serverValue: planStr)
+            else {
+                log.info(
+                    "syncEntitlements ok but plan parse failed: \(data["plan"] as? String ?? "?", privacy: .public)"
+                )
                 return false
             }
             let serverOwned = Set((data["ownedProductIDs"] as? [String]) ?? [])
@@ -552,9 +586,12 @@ final class PremiumManager: ObservableObject {
             }
             UserDefaults.standard.set(serverPlan.cacheValue, forKey: planCacheKey)
             UserDefaults.standard.set(serverPlan.cacheValue, forKey: lastKnownServerPlanKey)
-            UserDefaults.standard.set(Array(serverOwned).sorted().joined(separator: ","), forKey: lastKnownServerOwnedKey)
+            UserDefaults.standard.set(
+                Array(serverOwned).sorted().joined(separator: ","), forKey: lastKnownServerOwnedKey)
             UserDefaults.standard.set(tier.rawValue, forKey: lastKnownServerQueueTierKey)
-            log.info("syncEntitlements applied server plan=\(serverPlan.cacheValue, privacy: .public) queueTier=\(tier.rawValue, privacy: .public) owned=\(serverOwned.count, privacy: .public)")
+            log.info(
+                "syncEntitlements applied server plan=\(serverPlan.cacheValue, privacy: .public) queueTier=\(tier.rawValue, privacy: .public) owned=\(serverOwned.count, privacy: .public)"
+            )
             return true
         } catch {
             log.debug("syncEntitlements failed: \(error.localizedDescription, privacy: .public)")
@@ -592,7 +629,8 @@ final class PremiumManager: ObservableObject {
                 await t.finish()
                 await refreshEntitlements(mode: .force)
             } catch {
-                log.error("verify failed (updates): \(error.localizedDescription, privacy: .public)")
+                log.error(
+                    "verify failed (updates): \(error.localizedDescription, privacy: .public)")
                 continue
             }
         }
@@ -605,7 +643,8 @@ extension PremiumManager {
     /// 未ロード時の暫定判定用（UserDefaults キャッシュ）
     var cachedPlan: Plan {
         guard let raw = UserDefaults.standard.string(forKey: planCacheKey),
-              let p = Plan.from(cacheValue: raw) else { return .free }
+            let p = Plan.from(cacheValue: raw)
+        else { return .free }
         return p
     }
 
@@ -698,5 +737,3 @@ extension PremiumManager {
         }
     }
 }
-
-

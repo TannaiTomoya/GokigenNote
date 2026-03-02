@@ -5,11 +5,11 @@
 //  Created by 丹内智弥 on 2025/11/19.
 //
 
+import Combine
 @preconcurrency import Dispatch
+import FirebaseFirestore
 import Foundation
 import SwiftUI
-import Combine
-import FirebaseFirestore
 
 final class GokigenViewModel: ObservableObject {
     @Published var selectedMood: Mood = .neutral
@@ -313,7 +313,9 @@ final class GokigenViewModel: ObservableObject {
 
     /// 言い換え結果をキャッシュに追加（最大件数で古いものを削除・TTL 1分）
     private func setReformulationCache(cacheKey: String, result: String) {
-        if reformulationCacheOrder.count >= Self.reformulationCacheMaxCount, let first = reformulationCacheOrder.first {
+        if reformulationCacheOrder.count >= Self.reformulationCacheMaxCount,
+            let first = reformulationCacheOrder.first
+        {
             reformulationCacheOrder.removeFirst()
             reformulationCache.removeValue(forKey: first)
         }
@@ -346,24 +348,24 @@ final class GokigenViewModel: ObservableObject {
     private let micExamples: [Mood: [String]] = [
         .veryHappy: [
             "今日は嬉しいことが続いて笑顔で過ごせた。",
-            "頑張ったぶん褒めてもらえて、心がふわっと温かくなった。"
+            "頑張ったぶん褒めてもらえて、心がふわっと温かくなった。",
         ],
         .happy: [
             "ちょっとした会話が楽しくて気持ちが軽くなった。",
-            "好きな音楽を聴いたら自然と前向きになれた。"
+            "好きな音楽を聴いたら自然と前向きになれた。",
         ],
         .neutral: [
             "特別な出来事はなかったけれど穏やかだった。",
-            "いつものペースで進められて少し安心した。"
+            "いつものペースで進められて少し安心した。",
         ],
         .sad: [
             "思っていたより疲れが残っていて少し落ち込んだ。",
-            "自分の気持ちをうまく伝えられず、もどかしい。"
+            "自分の気持ちをうまく伝えられず、もどかしい。",
         ],
         .verySad: [
             "ずっと心がざわついていて、深呼吸を忘れていたかも。",
-            "エネルギーが出ず、誰かに頼りたい気持ちが強かった。"
-        ]
+            "エネルギーが出ず、誰かに頼りたい気持ちが強かった。",
+        ],
     ]
 
     func setUserId(_ userId: String) {
@@ -479,7 +481,9 @@ final class GokigenViewModel: ObservableObject {
                 await MainActor.run {
                     self.entries = self.merge(local: self.entries, remote: result.entries)
                     self.lastEntryDoc = result.lastDoc
-                    self.canLoadMore = !result.entries.isEmpty && result.entries.count == 30 && result.lastDoc != nil
+                    self.canLoadMore =
+                        !result.entries.isEmpty && result.entries.count == 30
+                        && result.lastDoc != nil
                     self.isSyncing = false
                     let toCache = Array(self.entries.prefix(Self.maxEntriesToCache))
                     self.persistence.saveEntries(toCache, userId: userId)
@@ -520,7 +524,9 @@ final class GokigenViewModel: ObservableObject {
                     }
                     self.entries = self.trimEntriesToLimit(next)
                     self.lastEntryDoc = result.lastDoc
-                    self.canLoadMore = !result.entries.isEmpty && result.entries.count == 30 && result.lastDoc != nil
+                    self.canLoadMore =
+                        !result.entries.isEmpty && result.entries.count == 30
+                        && result.lastDoc != nil
                     self.isLoadingEntries = false
                 }
             } catch {
@@ -566,8 +572,9 @@ final class GokigenViewModel: ObservableObject {
 
         // キャッシュヒットは0消費
         if !forceRefresh,
-           let cache = lastGeminiSuccess,
-           cache.text == trimmed {
+            let cache = lastGeminiSuccess,
+            cache.text == trimmed
+        {
             empathyDraft = cache.response.empathy
             nextStepDraft = cache.response.nextStep
             return
@@ -608,7 +615,9 @@ final class GokigenViewModel: ObservableObject {
                 )
 
                 await MainActor.run {
-                    PremiumManager.shared.applyServerQuota(used: quota.used, remaining: quota.remaining, limit: quota.limit, resetKey: quota.resetKey)
+                    PremiumManager.shared.applyServerQuota(
+                        used: quota.used, remaining: quota.remaining, limit: quota.limit,
+                        resetKey: quota.resetKey)
                     guard self.empathyRequestID == token.id else { return }
                 }
 
@@ -616,14 +625,18 @@ final class GokigenViewModel: ObservableObject {
                     await MainActor.run {
                         guard self.empathyRequestID == token.id else { return }
                         if let sec = quota.cooldownRemainingSeconds, sec > 0 {
-                            self.reformulateCooldownEndAt = Date().addingTimeInterval(TimeInterval(sec))
+                            self.reformulateCooldownEndAt = Date().addingTimeInterval(
+                                TimeInterval(sec))
                             self.publishError(message: "あと\(sec)秒お待ちください")
                         } else if quota.paywall, quota.reason == "quota_exceeded" {
                             PaywallCoordinator.shared.presentQuotaExceeded()
                         } else {
                             self.publishError(message: "混雑中です。少し待ってからもう一度お試しください。")
-                            let tier: QueueTier = PremiumManager.shared.effectivePlan.serverPlanValue == "subscription_yearly" ? .priority : .standard
-                            PaywallCoordinator.shared.presentCongestion(tier: tier, retryAfterSeconds: nil, retryAction: .empathy)
+                            let tier: QueueTier =
+                                PremiumManager.shared.effectivePlan.serverPlanValue
+                                    == "subscription_yearly" ? .priority : .standard
+                            PaywallCoordinator.shared.presentCongestion(
+                                tier: tier, retryAfterSeconds: nil, retryAction: .empathy)
                         }
                     }
                     return
@@ -633,7 +646,9 @@ final class GokigenViewModel: ObservableObject {
                     guard self.empathyRequestID == token.id else { return }
                     if QuotaService.isUnauthenticated(error) {
                         self.publishError(message: "ログインが必要です。")
-                    } else if CongestionGateHandler.presentIfNeeded(error: error, op: .empathy, payloadKey: trimmed) {
+                    } else if CongestionGateHandler.presentIfNeeded(
+                        error: error, op: .empathy, payloadKey: trimmed)
+                    {
                         self.publishError(message: "混雑中です。少し待ってからもう一度お試しください。")
                     } else {
                         self.publishError(message: "回数確認に失敗しました。通信状況を確認してください。")
@@ -663,7 +678,7 @@ final class GokigenViewModel: ObservableObject {
             }
         }
     }
-    
+
     @MainActor
     func reformulateText() {
         let trimmed = InputLimit.clampText(draftText, maxChars: InputLimit.reformulate)
@@ -719,7 +734,10 @@ final class GokigenViewModel: ObservableObject {
             return
         }
 
-        guard let token = beginAIRequest(kind: .reformulation) else { return }
+        guard let token = beginAIRequest(kind: .reformulation) else {
+            publishError(message: "しばらくお待ちください。前の処理が完了してからお試しください。")
+            return
+        }
         recordGeminiAPICall()
 
         pendingReformulate = PendingReformulate(
@@ -740,7 +758,9 @@ final class GokigenViewModel: ObservableObject {
                 )
 
                 await MainActor.run {
-                    PremiumManager.shared.applyServerQuota(used: quota.used, remaining: quota.remaining, limit: quota.limit, resetKey: quota.resetKey)
+                    PremiumManager.shared.applyServerQuota(
+                        used: quota.used, remaining: quota.remaining, limit: quota.limit,
+                        resetKey: quota.resetKey)
                     guard self.reformulationRequestID == token.id else { return }
                 }
 
@@ -748,14 +768,18 @@ final class GokigenViewModel: ObservableObject {
                     await MainActor.run {
                         guard self.reformulationRequestID == token.id else { return }
                         if let sec = quota.cooldownRemainingSeconds, sec > 0 {
-                            self.reformulateCooldownEndAt = Date().addingTimeInterval(TimeInterval(sec))
+                            self.reformulateCooldownEndAt = Date().addingTimeInterval(
+                                TimeInterval(sec))
                             self.publishError(message: "あと\(sec)秒お待ちください")
                         } else if quota.paywall, quota.reason == "quota_exceeded" {
                             PaywallCoordinator.shared.presentQuotaExceeded()
                         } else {
                             self.publishError(message: "混雑中です。少し待ってからもう一度お試しください。")
-                            let tier: QueueTier = PremiumManager.shared.effectivePlan.serverPlanValue == "subscription_yearly" ? .priority : .standard
-                            PaywallCoordinator.shared.presentCongestion(tier: tier, retryAfterSeconds: nil, retryAction: .reformulate)
+                            let tier: QueueTier =
+                                PremiumManager.shared.effectivePlan.serverPlanValue
+                                    == "subscription_yearly" ? .priority : .standard
+                            PaywallCoordinator.shared.presentCongestion(
+                                tier: tier, retryAfterSeconds: nil, retryAction: .reformulate)
                         }
                     }
                     return
@@ -765,7 +789,9 @@ final class GokigenViewModel: ObservableObject {
                     guard self.reformulationRequestID == token.id else { return }
                     if QuotaService.isUnauthenticated(error) {
                         self.publishError(message: "ログインが必要です。")
-                    } else if CongestionGateHandler.presentIfNeeded(error: error, op: .reformulate, payloadKey: cacheKey) {
+                    } else if CongestionGateHandler.presentIfNeeded(
+                        error: error, op: .reformulate, payloadKey: cacheKey)
+                    {
                         self.publishError(message: "混雑中です。少し待ってからもう一度お試しください。")
                     } else {
                         self.publishError(message: "回数確認に失敗しました。通信状況を確認してください。")
@@ -775,35 +801,67 @@ final class GokigenViewModel: ObservableObject {
             }
 
             do {
-                try await performReformulate(text: trimmed, context: context, cacheKey: cacheKey, token: token)
+                try await performReformulate(
+                    text: trimmed, context: context, cacheKey: cacheKey, token: token)
             } catch {
                 print("[Gemini] ERROR reformulateText: \(error)")
                 await MainActor.run {
                     guard self.reformulationRequestID == token.id else { return }
-                    if CongestionGateHandler.presentIfNeeded(error: error, op: .reformulate, payloadKey: cacheKey) {
+                    if CongestionGateHandler.presentIfNeeded(
+                        error: error, op: .reformulate, payloadKey: cacheKey)
+                    {
                         self.publishError(message: "混雑中のため、言い換えに時間がかかっています。少し待ってからもう一度お試しください。")
                         return
                     }
+                    let ns = error as NSError
+                    let isInternal = (error.localizedDescription.uppercased().contains("INTERNAL"))
+                        || (ns.domain == "FunctionsErrorDomain" && ns.code == 13)
+                    let isQuotaExhausted = QuotaService.isResourceExhausted(error)
+                    let errorMessage: String
+                    if isQuotaExhausted {
+                        errorMessage = "本日の回数を使い切りました。明日またお試しください。"
+                    } else if isInternal {
+                        errorMessage = "言い換えに失敗しました。しばらくしてからお試しください。"
+                    } else {
+                        errorMessage = Copy.fallbackReformulation
+                    }
                     let fallback = EmpathyEngine.reformulateLocal(original: trimmed)
-                    let textToShow = fallback.isEmpty
+                    let textToShow =
+                        fallback.isEmpty
                         ? "変換を取得できませんでした。しばらくしてからやり直してください。"
                         : fallback
                     self.reformulatedText = textToShow
-                    self.publishError(message: Copy.fallbackReformulation)
+                    self.publishError(message: errorMessage)
                     self.saveEntryAfterReformulateSuccess(rawText: trimmed, rewriteText: textToShow)
                 }
             }
         }
     }
 
+    /// 空やプレースホルダ（〇〇のみ等）は無効とみなし、失敗扱いにしてフォールバックへ
+    private static func isInvalidReformulationResult(_ s: String) -> Bool {
+        let t = s.trimmingCharacters(in: .whitespacesAndNewlines)
+        if t.isEmpty { return true }
+        let normalized = t.replacingOccurrences(of: "〇", with: "")
+        if normalized.isEmpty { return true }
+        return false
+    }
+
     /// 言い換えの実実行（callable 呼び出し＋UI反映）。reformulateText と retryReformulateIfPossible から利用。
-    private func performReformulate(text: String, context: ReformulationContext, cacheKey: String, token: AIRequestToken) async throws {
-        let reformulated = try await geminiService.reformulateText(for: text, context: context)
+    private func performReformulate(
+        text: String, context: ReformulationContext, cacheKey: String, token: AIRequestToken
+    ) async throws {
+        let (reformulated, isFallback) = try await geminiService.reformulateText(for: text, context: context)
+        if Self.isInvalidReformulationResult(reformulated) {
+            throw NSError(domain: "GokigenViewModel", code: -1, userInfo: [NSLocalizedDescriptionKey: "言い換え結果が取得できませんでした。"])
+        }
         await MainActor.run {
             guard self.reformulationRequestID == token.id else { return }
             self.reformulatedText = reformulated
             self.setReformulationCache(cacheKey: cacheKey, result: reformulated)
-            if !self.hasShownFirstReformulationSuccess {
+            if isFallback {
+                self.publishError(message: "通信の都合で入力文をそのまま表示しています。しばらくして再度お試しください。")
+            } else if !self.hasShownFirstReformulationSuccess {
                 self.hasShownFirstReformulationSuccess = true
                 self.lastSuccessMessage = "そのまま使えます"
             }
@@ -819,9 +877,13 @@ final class GokigenViewModel: ObservableObject {
         defer { endAIRequest(token) }
 
         do {
-            try await performReformulate(text: pending.text, context: pending.context, cacheKey: pending.cacheKey, token: token)
+            try await performReformulate(
+                text: pending.text, context: pending.context, cacheKey: pending.cacheKey,
+                token: token)
         } catch {
-            if CongestionGateHandler.presentIfNeeded(error: error, op: .reformulate, payloadKey: pending.cacheKey) {
+            if CongestionGateHandler.presentIfNeeded(
+                error: error, op: .reformulate, payloadKey: pending.cacheKey)
+            {
                 publishError(message: "混雑中です。少し待ってからもう一度お試しください。")
             } else {
                 publishError(message: "言い換えに失敗しました。もう一度お試しください。")
@@ -876,7 +938,7 @@ final class GokigenViewModel: ObservableObject {
             promptMeta: [
                 "purpose": context.purpose.rawValue,
                 "audience": context.audience.rawValue,
-                "tone": context.tone.rawValue
+                "tone": context.tone.rawValue,
             ],
             model: nil,
             usage: nil,
@@ -896,7 +958,8 @@ final class GokigenViewModel: ObservableObject {
                         self.draftSession = session
                     }
                 }
-                try await FirestoreService.shared.upsertEntry(uid: uid, entryId: draftId, payload: payload)
+                try await FirestoreService.shared.upsertEntry(
+                    uid: uid, entryId: draftId, payload: payload)
                 await MainActor.run {
                     self.autoSaveState = .saved
                     self.lastInputWasVoice = false
@@ -971,14 +1034,16 @@ final class GokigenViewModel: ObservableObject {
             date: sessionForPayload.createdAtLocal,
             mood: moodForEntry,
             originalText: sessionForPayload.rawText,
-            reformulatedText: sessionForPayload.rewriteText.isEmpty ? nil : sessionForPayload.rewriteText,
+            reformulatedText: sessionForPayload.rewriteText.isEmpty
+                ? nil : sessionForPayload.rewriteText,
             empathyText: sessionForPayload.empathyText,
             nextStep: sessionForPayload.nextStep
         )
 
         Task {
             do {
-                try await FirestoreService.shared.upsertEntry(uid: uid, entryId: draftId, payload: payload)
+                try await FirestoreService.shared.upsertEntry(
+                    uid: uid, entryId: draftId, payload: payload)
                 try await FirestoreService.shared.finalizeEntry(uid: uid, entryId: draftId)
                 await MainActor.run {
                     withAnimation(.easeInOut) { self.entries.insert(finalEntry, at: 0) }
@@ -1002,7 +1067,7 @@ final class GokigenViewModel: ObservableObject {
     @MainActor
     func delete(at offsets: IndexSet) {
         let entriesToDelete = offsets.map { entries[$0] }
-        
+
         withAnimation(.easeInOut) {
             entries.remove(atOffsets: offsets)
         }
@@ -1016,12 +1081,13 @@ final class GokigenViewModel: ObservableObject {
         if let userId = currentUserId {
             Task {
                 for entry in entriesToDelete {
-                    try? await firestoreService.deleteEntry(entryId: entry.documentId ?? entry.id.uuidString, for: userId)
+                    try? await firestoreService.deleteEntry(
+                        entryId: entry.documentId ?? entry.id.uuidString, for: userId)
                 }
             }
         }
     }
-    
+
     @MainActor
     func move(from source: IndexSet, to destination: Int) {
         withAnimation(.easeInOut) {
@@ -1033,7 +1099,7 @@ final class GokigenViewModel: ObservableObject {
             persistence.save(entries)
         }
     }
-    
+
     @MainActor
     func deleteAllEntries() {
         withAnimation(.easeInOut) {
@@ -1099,7 +1165,8 @@ final class GokigenViewModel: ObservableObject {
         let negatives = latest.filter { $0.mood.rawValue < 0 }.count
         let tendency = average >= 0 ? "少し前向き" : "少しお疲れ気味"
 
-        return "直近\(latest.count)件は\(tendency)。平均スコア \(String(format: "%.1f", average))、ポジ \(positives)／ネガ \(negatives)。"
+        return
+            "直近\(latest.count)件は\(tendency)。平均スコア \(String(format: "%.1f", average))、ポジ \(positives)／ネガ \(negatives)。"
     }
 
     var trendSnapshot: TrendSnapshot {
@@ -1111,21 +1178,23 @@ final class GokigenViewModel: ObservableObject {
         let negatives = latest.filter { $0.mood.rawValue < 0 }.count
         let tendency = average >= 0 ? "少し前向き" : "少しお疲れ気味"
         let dominantEmoji = latest.first?.mood.emoji ?? "🙂"
-        let feedback = "\(latest.count)件は\(tendency)。平均 \(String(format: "%.1f", average))、ポジ \(positives)／ネガ \(negatives)。"
-        let consecutiveDays = latest.first.map { entry in
-            var count = 1
-            var lastDate = Calendar.current.startOfDay(for: entry.date)
-            for record in latest.dropFirst() {
-                let day = Calendar.current.startOfDay(for: record.date)
-                if Calendar.current.dateComponents([.day], from: day, to: lastDate).day == 1 {
-                    count += 1
-                    lastDate = day
-                } else {
-                    break
+        let feedback =
+            "\(latest.count)件は\(tendency)。平均 \(String(format: "%.1f", average))、ポジ \(positives)／ネガ \(negatives)。"
+        let consecutiveDays =
+            latest.first.map { entry in
+                var count = 1
+                var lastDate = Calendar.current.startOfDay(for: entry.date)
+                for record in latest.dropFirst() {
+                    let day = Calendar.current.startOfDay(for: record.date)
+                    if Calendar.current.dateComponents([.day], from: day, to: lastDate).day == 1 {
+                        count += 1
+                        lastDate = day
+                    } else {
+                        break
+                    }
                 }
-            }
-            return count
-        } ?? 0
+                return count
+            } ?? 0
 
         return TrendSnapshot(
             averageScore: average,
@@ -1148,13 +1217,10 @@ final class GokigenViewModel: ObservableObject {
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
         encoder.dateEncodingStrategy = .iso8601
         guard let data = try? encoder.encode(entries),
-              let json = String(data: data, encoding: .utf8) else {
+            let json = String(data: data, encoding: .utf8)
+        else {
             return nil
         }
         return json
     }
 }
-
-
-
-

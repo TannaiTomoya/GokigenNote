@@ -48,10 +48,10 @@ function clampText(s: string | null | undefined, maxChars: number): string {
   return t.slice(0, maxChars);
 }
 
-/** Gemini 出力トークン上限（コスト・暴走防止）。短いほどコスト削減・品質安定。 */
+/** Gemini 出力トークン上限（コスト・暴走防止）。言い換えは元の長さを保つため多め。 */
 const MAX_OUTPUT_TOKENS = {
   lineStopper: 180,
-  reformulate: 120,
+  reformulate: 280,
   empathy: 220,
 } as const;
 
@@ -1106,7 +1106,7 @@ function buildReformulatePrompt(
 
 ・相手に伝わる
 ・誤解されない
-・簡潔
+・無駄を省きつつ、必要な内容は残す
 ${premiumNote}
 
 【追加の指定】
@@ -1117,7 +1117,7 @@ ${premiumNote}
 入力:
 ${text}
 
-上記に沿って言語化し、200文字以内でまとめてください。説明やラベルは不要です。文章のみを返してください。
+元の文の長さ・内容を保ちつつ、伝わりやすく整えてください。説明やラベルは不要です。文章のみを返してください。
 `.trim();
 }
 
@@ -1179,7 +1179,8 @@ export const reformulate = onCall(
       return { text: result || text, queueTier: limits.tier, limits };
     } catch (e) {
       logger.warn("reformulate Gemini error", e);
-      throw new HttpsError("internal", "Reformulation failed.");
+      // 失敗時も入力文を返し、クライアントで確実に何か表示されるようにする
+      return { text: text, queueTier: limits.tier, limits, fallback: true };
     }
   }
 );
