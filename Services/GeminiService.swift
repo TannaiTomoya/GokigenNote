@@ -170,8 +170,8 @@ final class GeminiService {
         return result
     }
 
-    /// 地雷LINEストッパー: キャッシュ → レート制限（補助輪）→ Functions lineStopper 呼び出し（キー・RPM はサーバ）
-    func generateLineStopperResult(text: String) async throws -> (riskRaw: String, oneLiner: String, suggestions: [(label: String, text: String)]) {
+    /// 地雷LINEストッパー: キャッシュ → レート制限（補助輪）→ Functions lineStopper 呼び出し（キー・RPM はサーバ）。返却に queueTier を含む。
+    func generateLineStopperResult(text: String) async throws -> (riskRaw: String, oneLiner: String, suggestions: [(label: String, text: String)], queueTier: String) {
         let key = makeLineStopperCacheKey(text)
         if let cached = await lineStopperCache.get(key) {
             return cached.value
@@ -179,7 +179,8 @@ final class GeminiService {
 
         await lineStopperLimiter.acquire()
         do {
-            let result = try await LineStopperRemoteService.shared.check(text: text)
+            let remote = try await LineStopperRemoteService.shared.check(text: text)
+            let result = (remote.riskRaw, remote.oneLiner, remote.suggestions, remote.queueTier.rawValue)
             await lineStopperCache.set(key, .init(value: result, createdAt: Date()))
             await lineStopperLimiter.release()
             return result

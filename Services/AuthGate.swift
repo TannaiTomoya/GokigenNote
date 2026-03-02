@@ -5,6 +5,7 @@
 //  Auth 状態確定前に Firestore を触らないためのゲート（1箇所で守る）
 //
 
+import Combine
 import Foundation
 
 enum AuthGateError: Error {

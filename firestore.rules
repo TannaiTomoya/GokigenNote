@@ -94,6 +94,16 @@ service cloud.firestore {
         allow read: if isOwner();
         allow update, delete: if false;
       }
+
+      // =========================
+      // lineChecks（地雷ストッパー履歴）
+      // 作成は Functions 専用。クライアントは read + update（フィードバック・コピー記録）
+      // =========================
+      match /lineChecks/{checkId} {
+        allow read: if isOwner();
+        allow update: if isOwner();
+        allow create, delete: if false;
+      }
     }
   }
 }

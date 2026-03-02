@@ -5,6 +5,14 @@
 
 import Foundation
 
+/// 待機UIとポーリングを同期させるための進捗（Service が保持）
+enum LineStopperProgress: Equatable {
+    case idle
+    case waiting(seconds: Int)
+    case processing
+    case done
+}
+
 enum LineStopperRisk: Int, Comparable {
     case low = 0
     case medium = 1

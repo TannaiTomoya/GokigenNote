@@ -22,6 +22,8 @@ struct QuotaCheckResult: Equatable {
     let resetKey: String
     let reason: String?
     let paywall: Bool
+    /// 無料ユーザー連打制限: クールダウン残り秒数（reason == "cooldown" のときのみ）
+    let cooldownRemainingSeconds: Int?
 }
 
 final class QuotaService {
@@ -72,6 +74,7 @@ final class QuotaService {
         let resetKey = (dict["resetKey"] as? String) ?? ""
         let reason = dict["reason"] as? String
         let paywall = (dict["paywall"] as? Bool) ?? false
+        let cooldownRemainingSeconds = dict["cooldownRemainingSeconds"] as? Int
 
         return QuotaCheckResult(
             allowed: allowed,
@@ -81,7 +84,8 @@ final class QuotaService {
             remaining: remaining,
             resetKey: resetKey,
             reason: reason,
-            paywall: paywall
+            paywall: paywall,
+            cooldownRemainingSeconds: cooldownRemainingSeconds
         )
     }
 }

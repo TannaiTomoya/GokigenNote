@@ -8,6 +8,8 @@
 
 /* Begin PBXBuildFile section */
 		A808D9B42F4723F500D9922F /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A808D9B32F4723F500D9922F /* Assets.xcassets */; };
+		A83B15D42F5522EA0012A231 /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = A83B15D02F53E9B80012A231 /* GoogleService-Info.plist */; };
+		A83B15D62F5524490012A231 /* Gemini-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = A808D9AD2F4723F300D9922F /* Gemini-Info.plist */; };
 		A86406162ED02F1D005DD4B1 /* GoogleGenerativeAI in Frameworks */ = {isa = PBXBuildFile; productRef = A86406152ED02F1D005DD4B1 /* GoogleGenerativeAI */; };
 		A86407D62ED1AD02005DD4B1 /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = A86407D52ED1AD02005DD4B1 /* FirebaseAuth */; };
 		A86407DE2ED1BA41005DD4B1 /* FirebaseCore in Frameworks */ = {isa = PBXBuildFile; productRef = A86407DD2ED1BA41005DD4B1 /* FirebaseCore */; };
@@ -18,6 +20,7 @@
 /* Begin PBXFileReference section */
 		A808D9AD2F4723F300D9922F /* Gemini-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = "Gemini-Info.plist"; sourceTree = "<group>"; };
 		A808D9B32F4723F500D9922F /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		A83B15D02F53E9B80012A231 /* GoogleService-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "GoogleService-Info.plist"; sourceTree = "<group>"; };
 		A864050C2ECCE879005DD4B1 /* GokigenNote.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = GokigenNote.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A86407E12ED1BF73005DD4B1 /* GokigenNote-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = "GokigenNote-Info.plist"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -71,6 +74,7 @@
 			children = (
 				A808D9B32F4723F500D9922F /* Assets.xcassets */,
 				A808D9AD2F4723F300D9922F /* Gemini-Info.plist */,
+				A83B15D02F53E9B80012A231 /* GoogleService-Info.plist */,
 				A86407E12ED1BF73005DD4B1 /* GokigenNote-Info.plist */,
 				A864050E2ECCE879005DD4B1 /* GokigenNoteApp.swift */,
 				A864051A2ECCF1C0005DD4B1 /* Models */,
@@ -98,8 +102,6 @@
 			buildPhases = (
 				A86405082ECCE879005DD4B1 /* Sources */,
 				A86405092ECCE879005DD4B1 /* Frameworks */,
-				A808D9B02F4723F300D9922F /* Ensure Gemini-Info.plist */,
-				A808D9B52F4723F600D9922F /* Ensure GoogleService-Info.plist */,
 				A864050A2ECCE879005DD4B1 /* Resources */,
 			);
 			buildRules = (
@@ -133,7 +135,7 @@
 			attributes = {
 				BuildIndependentTargetsInParallel = 1;
 				LastSwiftUpdateCheck = 2600;
-				LastUpgradeCheck = 2600;
+				LastUpgradeCheck = 2620;
 				TargetAttributes = {
 					A864050B2ECCE879005DD4B1 = {
 						CreatedOnToolsVersion = 26.0.1;
@@ -163,54 +165,13 @@
 		};
 /* End PBXProject section */
 
-/* Begin PBXShellScriptBuildPhase section */
-		A808D9B02F4723F300D9922F /* Ensure Gemini-Info.plist */ = {
-			isa = PBXShellScriptBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			inputFileListPaths = (
-			);
-			inputPaths = (
-				"$(SRCROOT)/Gemini-Info.plist.example",
-			);
-			name = "Ensure Gemini-Info.plist";
-			outputFileListPaths = (
-			);
-			outputPaths = (
-				"$(BUILT_PRODUCTS_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/Gemini-Info.plist",
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-			shellPath = /bin/sh;
-			shellScript = "if [ -f \"${SRCROOT}/Gemini-Info.plist\" ]; then\n  cp \"${SRCROOT}/Gemini-Info.plist\" \"${BUILT_PRODUCTS_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/Gemini-Info.plist\"\nelse\n  echo \"Warning: Gemini-Info.plist not found. Copy from Gemini-Info.plist.example and set API_KEY.\"\n  cp \"${SRCROOT}/Gemini-Info.plist.example\" \"${BUILT_PRODUCTS_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/Gemini-Info.plist\"\nfi\n";
-		};
-		A808D9B52F4723F600D9922F /* Ensure GoogleService-Info.plist */ = {
-			isa = PBXShellScriptBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			inputFileListPaths = (
-			);
-			inputPaths = (
-				"$(SRCROOT)/GoogleService-Info.plist.example",
-			);
-			name = "Ensure GoogleService-Info.plist";
-			outputFileListPaths = (
-			);
-			outputPaths = (
-				"$(BUILT_PRODUCTS_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/GoogleService-Info.plist",
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-			shellPath = /bin/sh;
-			shellScript = "if [ -f \"${SRCROOT}/GoogleService-Info.plist\" ]; then\n  cp \"${SRCROOT}/GoogleService-Info.plist\" \"${BUILT_PRODUCTS_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/GoogleService-Info.plist\"\nelse\n  echo \"Warning: GoogleService-Info.plist not found. Copy from GoogleService-Info.plist.example and set Firebase config.\"\n  cp \"${SRCROOT}/GoogleService-Info.plist.example\" \"${BUILT_PRODUCTS_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/GoogleService-Info.plist\"\nfi\n";
-		};
-/* End PBXShellScriptBuildPhase section */
-
 /* Begin PBXResourcesBuildPhase section */
 		A864050A2ECCE879005DD4B1 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A83B15D62F5524490012A231 /* Gemini-Info.plist in Resources */,
+				A83B15D42F5522EA0012A231 /* GoogleService-Info.plist in Resources */,
 				A808D9B42F4723F500D9922F /* Assets.xcassets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -287,6 +248,7 @@
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
 				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 			};
@@ -344,6 +306,7 @@
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_COMPILATION_MODE = wholemodule;
 				VALIDATE_PRODUCT = YES;
 			};

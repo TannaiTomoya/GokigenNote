@@ -106,6 +106,7 @@ final class SpeechInputService: ObservableObject {
         let format = inputNode.outputFormat(forBus: 0)
 
         inputNode.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
+            guard buffer.frameLength > 0 else { return }
             self?.recognitionRequest?.append(buffer)
         }
 

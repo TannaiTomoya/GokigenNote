@@ -5,6 +5,7 @@
 //  Created by 丹内智弥 on 2025/11/22.
 //
 
+import Combine
 import Foundation
 import UIKit
 import FirebaseAuth

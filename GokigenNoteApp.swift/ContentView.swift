@@ -5,6 +5,7 @@
 //  Created by 丹内智弥 on 2025/11/19.
 //
 import SwiftUI
+import Combine
 #if os(iOS)
 import UIKit
 #endif
@@ -71,10 +72,23 @@ struct TodayView: View {
                     TrendCard(snapshot: vm.trendSnapshot)
                 }
                 .padding()
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                }
             }
+            .scrollDismissesKeyboard(.interactively)
             .background(Color(.systemGroupedBackground).ignoresSafeArea())
             .navigationTitle("ごきげんノート")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("完了") {
+                        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                    }
+                }
+            }
             .overlay(toastOverlay, alignment: .bottom)
             .alert("音声認識を利用できません", isPresented: $showSpeechPermissionAlert) {
                 Button("OK", role: .cancel) {}
@@ -366,6 +380,9 @@ struct TodayView: View {
                                 .stroke(Color(.separator), lineWidth: 0.5)
                         )
                 }
+                Text("入力は言い換え\(InputLimit.reformulate)文字・共感\(InputLimit.empathy)文字まで。長文は要点だけ残して貼ってください。")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
             }
         }
     }
@@ -384,6 +401,8 @@ struct TodayView: View {
                     if vm.isLoadingReformulation {
                         ProgressView()
                         Text("考え中…")
+                    } else if let end = vm.reformulateCooldownEndAt, end.timeIntervalSinceNow > 0 {
+                        Text("あと\(max(0, Int(end.timeIntervalSinceNow)))秒")
                     } else {
                         Text("言い換えをつくる")
                     }
@@ -394,7 +413,11 @@ struct TodayView: View {
             .disabled(
                 vm.isLoadingReformulation
                     || vm.draftText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    || (vm.reformulateCooldownEndAt.map { $0.timeIntervalSinceNow > 0 } ?? false)
             )
+            .onReceive(Timer.publish(every: 1, on: .main, in: .common).autoconnect()) { _ in
+                vm.clearReformulateCooldownIfNeeded()
+            }
             .accessibilityHint("入力文をより綺麗に言語化します")
         }
     }
@@ -588,3 +611,4 @@ struct ToastBanner: View {
         //.accessibilityLiveRegion(AccessibilityLiveRegion.assertive)
     }
 }
+

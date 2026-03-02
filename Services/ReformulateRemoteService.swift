@@ -17,12 +17,15 @@ final class ReformulateRemoteService {
 
     /// サーバで Gemini 言い換え。キーはアプリに持たせない。
     func reformulate(text: String, context: ReformulationContext) async throws -> String {
+        let tier = PremiumManager.shared.queueTier.rawValue
         let params: [String: Any] = [
             "text": text,
             "scene": context.scene.displayName,
             "purpose": context.purpose.rawValue,
             "audience": context.audience.rawValue,
             "tone": context.tone.rawValue,
+            "isYearly": context.isYearly,
+            "queueTier": tier,
         ]
         let callable = functions.httpsCallable("reformulate")
         let res = try await callable.call(params)
@@ -34,3 +37,4 @@ final class ReformulateRemoteService {
         return resultText.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
+

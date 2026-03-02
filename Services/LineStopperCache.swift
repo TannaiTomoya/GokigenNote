@@ -9,7 +9,7 @@ import Foundation
 
 actor LineStopperCache {
     struct Entry {
-        let value: (riskRaw: String, oneLiner: String, suggestions: [(label: String, text: String)])
+        let value: (riskRaw: String, oneLiner: String, suggestions: [(label: String, text: String)], queueTier: String)
         let createdAt: Date
     }
 

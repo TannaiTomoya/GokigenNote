@@ -5,6 +5,7 @@
 //  Created by 丹内智弥 on 2025/11/22.
 //
 
+import Combine
 import SwiftUI
 import UIKit
 import FirebaseAuth
@@ -102,6 +103,9 @@ struct SettingsView: View {
                 } header: {
                     Text("課金")
                 } footer: {
+                    if premium.effectivePlan.isYearly {
+                        Text("年額プラン：優先処理・待ち時間ゼロ")
+                    }
                     Text("タップでプレミアムの申し込み・復元ができます。")
                 }
 
@@ -230,3 +234,4 @@ struct SettingsView: View {
         vm.deleteAllEntries()
     }
 }
+

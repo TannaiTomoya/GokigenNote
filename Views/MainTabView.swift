@@ -12,11 +12,12 @@ struct MainTabView: View {
     @StateObject private var trainingVM = TrainingViewModel()
     @StateObject private var network = NetworkMonitor()
     @ObservedObject var authVM: AuthViewModel
+    @ObservedObject private var paywallCoordinator = PaywallCoordinator.shared
 
     var body: some View {
         TabView {
             // 地雷LINEストッパー
-            LineStopperRootView(authVM: authVM)
+            LineStopperRootView(authVM: authVM, onSaveDraft: { text in vm.draftText = text })
                 .tabItem {
                     Label("地雷LINE", systemImage: "bubble.left.and.bubble.right")
                 }
@@ -50,6 +51,43 @@ struct MainTabView: View {
                 .tabItem {
                     Label("設定", systemImage: "gearshape")
                 }
+        }
+        .sheet(isPresented: Binding(
+            get: { paywallCoordinator.isPresented },
+            set: { if !$0 { PaywallCoordinator.shared.dismiss() } }
+        )) {
+            switch paywallCoordinator.modalKind {
+            case .paywall:
+                PaywallView()
+            case .congestion(let tier, let retryAfter, let retryAction):
+                CongestionGateView(
+                    tier: tier,
+                    retryAfterSeconds: retryAfter,
+                    onRetry: {
+                        if let action = retryAction {
+                            RetryBus.post(action)
+                        }
+                        PaywallCoordinator.shared.dismiss()
+                    },
+                    onUpgrade: {
+                        PaywallCoordinator.shared.dismiss()
+                        PaywallCoordinator.shared.present(preselect: .yearly)
+                    },
+                    onClose: { PaywallCoordinator.shared.dismiss() }
+                )
+            }
+        }
+        .sheet(isPresented: Binding(
+            get: { paywallCoordinator.isQuotaExceededSheetPresented },
+            set: { if !$0 { PaywallCoordinator.shared.dismissQuotaExceeded() } }
+        )) {
+            QuotaExceededView()
+        }
+        .sheet(isPresented: Binding(
+            get: { paywallCoordinator.isHighUpsellSheetPresented },
+            set: { if !$0 { PaywallCoordinator.shared.dismissHighUpsell() } }
+        )) {
+            HighUpsellSheet()
         }
         .onAppear {
             vm.authViewModel = authVM

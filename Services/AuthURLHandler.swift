@@ -7,6 +7,7 @@
 //  （iOS 26 で非推奨の UIApplicationDelegate open url の代わりに UIScene / SwiftUI .onOpenURL を使用）
 //
 
+import Combine
 import UIKit
 import FirebaseAuth
 

@@ -56,6 +56,16 @@ extension Plan {
         }
     }
 
+    /// Firestore・Functions 用（planAtTime 等）。free / lifetime / subscription_monthly / subscription_yearly
+    var serverPlanValue: String {
+        switch self {
+        case .free: return "free"
+        case .lifetime: return "lifetime"
+        case .subscription(.monthly): return "subscription_monthly"
+        case .subscription(.yearly): return "subscription_yearly"
+        }
+    }
+
     var displayName: String {
         switch self {
         case .free: return "無料"
@@ -72,6 +82,12 @@ extension Plan {
         }
     }
 
+    /// 年額サブスクかどうか（体感差：優先処理・待ち時間ゼロの表記用）
+    var isYearly: Bool {
+        if case .subscription(.yearly) = self { return true }
+        return false
+    }
+
     /// 回数制限。nil = 無制限
     var rewriteLimit: Int? {
         switch self {
@@ -83,7 +99,7 @@ extension Plan {
 
     var description: String {
         switch self {
-        case .free: return "1日10回まで利用可能"
+        case .free: return "初日20回・2日目以降10回まで"
         case .lifetime: return "月200回まで利用可能"
         case .subscription: return "無制限で利用可能"
         }
@@ -168,6 +184,7 @@ final class PremiumManager: ObservableObject {
     static let shared = PremiumManager()
 
     @Published private(set) var plan: Plan = .free
+    @Published private(set) var queueTier: QueueTier = .standard
     @Published private(set) var availableProducts: [Product] = []
     @Published private(set) var isLoading: Bool = false
     @Published private(set) var lastError: String?
@@ -198,6 +215,9 @@ final class PremiumManager: ObservableObject {
     }
     private var lastKnownServerOwnedKey: String {
         "PremiumManager.lastKnownServerOwned.\(currentUserId ?? "guest")"
+    }
+    private var lastKnownServerQueueTierKey: String {
+        "PremiumManager.lastKnownServerQueueTier.\(currentUserId ?? "guest")"
     }
 
     private init() {}
@@ -244,6 +264,7 @@ final class PremiumManager: ObservableObject {
     private func resetForLogout() {
         ownedProductIDs = []
         plan = .free
+        queueTier = .standard
         entitlementsLoaded = false
         lastServerQuota = nil
     }
@@ -422,6 +443,10 @@ final class PremiumManager: ObservableObject {
                     }
                     break
                 }
+                // 購入・復元直後にサーバー反映に失敗した場合、復元を促す（課金して使えない事態を防ぐ）
+                if mode == .userInitiated {
+                    lastError = "サーバーへの反映に失敗しました。しばらくしてから「購入を復元」をお試しください。"
+                }
             } else {
                 log.info("JWS count: 0 reason: server_sync_skipped (no jwsRepresentation or no entitlements)")
             }
@@ -431,11 +456,13 @@ final class PremiumManager: ObservableObject {
                let lastPlan = Plan.from(cacheValue: lastPlanRaw) {
                 let lastOwnedRaw = UserDefaults.standard.string(forKey: lastKnownServerOwnedKey) ?? ""
                 let lastOwned = lastOwnedRaw.isEmpty ? Set<String>() : Set(lastOwnedRaw.split(separator: ",").map { String($0) })
-                plan = lastPlan
-                ownedProductIDs = lastOwned
+                let tierRaw = UserDefaults.standard.string(forKey: lastKnownServerQueueTierKey) ?? "standard"
+                self.queueTier = QueueTier(rawValue: tierRaw) ?? .standard
+                self.plan = lastPlan
+                self.ownedProductIDs = lastOwned
                 UserDefaults.standard.set(lastPlan.cacheValue, forKey: planCacheKey)
                 entitlementsLoaded = true
-                log.info("PLAN: \(self.plan.cacheValue, privacy: .public) OWNED: lastKnownServer fallback count=\(lastOwned.count, privacy: .public)")
+                log.info("PLAN: \(self.plan.cacheValue, privacy: .public) queueTier=\(self.queueTier.rawValue, privacy: .public) OWNED: lastKnownServer fallback count=\(lastOwned.count, privacy: .public)")
                 if pendingEntitlementsRefresh {
                     log.debug("pendingEntitlementsRefresh -> rerun once")
                     continue
@@ -516,15 +543,24 @@ final class PremiumManager: ObservableObject {
                 return false
             }
             let serverOwned = Set((data["ownedProductIDs"] as? [String]) ?? [])
-            plan = serverPlan
-            ownedProductIDs = serverOwned
+            let tierStr = (data["queueTier"] as? String) ?? "standard"
+            let tier = QueueTier(rawValue: tierStr) ?? .standard
+            await MainActor.run {
+                self.plan = serverPlan
+                self.queueTier = tier
+                self.ownedProductIDs = serverOwned
+            }
             UserDefaults.standard.set(serverPlan.cacheValue, forKey: planCacheKey)
             UserDefaults.standard.set(serverPlan.cacheValue, forKey: lastKnownServerPlanKey)
             UserDefaults.standard.set(Array(serverOwned).sorted().joined(separator: ","), forKey: lastKnownServerOwnedKey)
-            log.info("syncEntitlements applied server plan=\(serverPlan.cacheValue, privacy: .public) owned=\(serverOwned.count, privacy: .public)")
+            UserDefaults.standard.set(tier.rawValue, forKey: lastKnownServerQueueTierKey)
+            log.info("syncEntitlements applied server plan=\(serverPlan.cacheValue, privacy: .public) queueTier=\(tier.rawValue, privacy: .public) owned=\(serverOwned.count, privacy: .public)")
             return true
         } catch {
             log.debug("syncEntitlements failed: \(error.localizedDescription, privacy: .public)")
+            await MainActor.run {
+                lastError = "サーバーへの反映に失敗しました。しばらくしてから「購入を復元」をお試しください。"
+            }
             return false
         }
     }
@@ -662,3 +698,5 @@ extension PremiumManager {
         }
     }
 }
+
+

@@ -7,7 +7,11 @@
 //
 
 import Combine
+import FirebaseAuth
 import SwiftUI
+#if os(iOS)
+import UIKit
+#endif
 
 // MARK: - ViewModel
 
@@ -24,31 +28,111 @@ final class LineStopperViewModel: ObservableObject {
 
     @Published var shouldShowPaywall: Bool = false
 
+    /// 5秒以上で混雑UI。年額なら出さない。
+    @Published var showQueueOverlay: Bool = false
+    @Published var elapsedSeconds: Int = 0
+    private var queueTimer: Timer?
+    /// 直近チェックの documentID（コピー時に logCopy に渡す）
+    private(set) var lastCheckId: String?
+
+    /// HIGH判定時の送信前ロック（Pause）表示
+    @Published var showHighGate: Bool = false
+    @Published var highGateUnlocking: Bool = false
+    /// 直近チェックの queueTier（HIGHゲートの出し分け用。Functions 返却の "priority"|"standard"）
+    @Published var lastQueueTier: String = "standard"
+
+    private var hasCancelledWaiting: Bool = false
+    private var retryObserver: NSObjectProtocol?
+
+    init() {
+        retryObserver = NotificationCenter.default.addObserver(
+            forName: RetryBus.retryRequested,
+            object: nil,
+            queue: .main
+        ) { [weak self] note in
+            guard let self else { return }
+            guard RetryBus.parseAction(note) == .lineStopper else { return }
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                await self.generate()
+            }
+        }
+    }
+
+    deinit {
+        if let o = retryObserver {
+            NotificationCenter.default.removeObserver(o)
+        }
+    }
+
     func resetResult() {
         risk = nil
         riskOneLiner = nil
         suggestions = []
         selectedSuggestion = nil
         errorMessage = nil
+        showHighGate = false
+        lastQueueTier = "standard"
+    }
+
+    /// 「あとで確認」タップ時。オーバーレイを閉じ、結果は破棄（バックグラウンドの完了は無視）
+    func cancelWaiting() {
+        hasCancelledWaiting = true
+        isLoading = false
+        LineStopperRemoteService.shared.resetProgress()
+    }
+
+    func startQueueTimer() {
+        elapsedSeconds = 0
+        showQueueOverlay = false
+        queueTimer?.invalidate()
+        queueTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            MainActor.assumeIsolated {
+                self.elapsedSeconds += 1
+                if self.elapsedSeconds >= 5 {
+                    self.showQueueOverlay = true
+                }
+            }
+        }
+        RunLoop.main.add(queueTimer!, forMode: .common)
+    }
+
+    func stopQueueTimer() {
+        queueTimer?.invalidate()
+        queueTimer = nil
+        showQueueOverlay = false
+    }
+
+    func dismissQueueOverlay() {
+        showQueueOverlay = false
     }
 
     func generate() async {
         errorMessage = nil
         shouldShowPaywall = false
+        hasCancelledWaiting = false
+        lastCheckId = nil
 
-        let trimmed = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmed = InputLimit.clampText(inputText, maxChars: InputLimit.lineStopper)
         guard !trimmed.isEmpty else {
             errorMessage = "LINE文を貼り付けてください。"
             return
         }
 
         isLoading = true
-        defer { isLoading = false }
+        startQueueTimer()
+        defer {
+            stopQueueTimer()
+            isLoading = false
+            LineStopperRemoteService.shared.resetProgress()
+        }
 
-        // Functions lineStopper（サーバでレート制限 + Gemini）。補助輪としてクライアント側キャッシュ・クールダウンあり
         do {
-            let (riskRaw, oneLiner, suggestionTuples) = try await GeminiService.shared
+            let (riskRaw, oneLiner, suggestionTuples, queueTier) = try await GeminiService.shared
                 .generateLineStopperResult(text: trimmed)
+
+            if hasCancelledWaiting { return }
 
             let mappedRisk: LineStopperRisk
             switch riskRaw.uppercased() {
@@ -62,11 +146,34 @@ final class LineStopperViewModel: ObservableObject {
                 LineStopperSuggestion(label: $0.label, text: $0.text)
             }
             selectedSuggestion = suggestions.first
+
+            lastQueueTier = queueTier
+            // HIGHゲート: queueTier だけで判定（priority なら出さない）
+            if mappedRisk == .high && queueTier != "priority" {
+                showHighGate = true
+            }
+
+            let plan = PremiumManager.shared.effectivePlan.serverPlanValue
+            if let uid = Auth.auth().currentUser?.uid {
+                let checkId = await LineCheckLogger.shared.logResult(
+                    uid: uid,
+                    risk: riskRaw.uppercased(),
+                    oneLiner: oneLiner,
+                    suggestions: suggestionTuples.map { ["label": $0.label, "text": $0.text] },
+                    latencyMs: elapsedSeconds * 1000,
+                    plan: plan,
+                    queueTier: queueTier,
+                    waitedMs: elapsedSeconds * 1000
+                )
+                lastCheckId = checkId
+            }
         } catch {
+            if hasCancelledWaiting { return }
+            if CongestionGateHandler.presentIfNeeded(error: error, op: .lineStopper, payloadKey: trimmed) {
+                return
+            }
             if QuotaService.isUnauthenticated(error) {
                 errorMessage = "接続を確認して再試行してください。"
-            } else if QuotaService.isResourceExhausted(error) {
-                errorMessage = "しばらく待ってからお試しください。"
             } else {
                 let raw = error.localizedDescription
                 if raw.contains("NOT FOUND") || raw.lowercased().contains("not found")
@@ -82,7 +189,25 @@ final class LineStopperViewModel: ObservableObject {
 
     func copySelected() {
         guard let text = selectedSuggestion?.text else { return }
+        #if os(iOS)
         UIPasteboard.general.string = text
+        #endif
+        if let uid = Auth.auth().currentUser?.uid,
+           let checkId = lastCheckId,
+           let suggestion = selectedSuggestion,
+           let idx = suggestions.firstIndex(where: { $0.id == suggestion.id }) {
+            Task {
+                await LineCheckLogger.shared.logCopy(uid: uid, checkId: checkId, label: suggestion.label, index: idx)
+            }
+        }
+    }
+
+    /// コピー時に呼ぶ（label と index を渡す）。HighResultView 等から使用。
+    func recordCopy(label: String, index: Int) {
+        guard let uid = Auth.auth().currentUser?.uid, let checkId = lastCheckId else { return }
+        Task {
+            await LineCheckLogger.shared.logCopy(uid: uid, checkId: checkId, label: label, index: index)
+        }
     }
 }
 
@@ -91,17 +216,43 @@ final class LineStopperViewModel: ObservableObject {
 struct LineStopperRootView: View {
     @StateObject private var vm = LineStopperViewModel()
     @ObservedObject private var pm = PremiumManager.shared
+    @ObservedObject private var remote = LineStopperRemoteService.shared
     @ObservedObject var authVM: AuthViewModel
+    var onSaveDraft: (String) -> Void = { _ in }
 
     var body: some View {
-        NavigationStack {
-            LineStopperInputView(vm: vm, authVM: authVM)
-                .navigationTitle("地雷LINEストッパー")
-                .navigationBarTitleDisplayMode(.inline)
-                .sheet(isPresented: $vm.shouldShowPaywall) {
-                    PaywallView()
-                }
-                .overlay { LoadingOverlay(isLoading: vm.isLoading || pm.isLoading) }
+        TabView {
+            NavigationStack {
+                LineStopperInputView(vm: vm, authVM: authVM, onSaveDraft: onSaveDraft)
+                    .navigationTitle("地雷LINEストッパー")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .sheet(isPresented: $vm.shouldShowPaywall) {
+                        PaywallView()
+                    }
+            }
+            .tabItem { Label("チェック", systemImage: "checkmark.bubble") }
+
+            HistoryView(authVM: authVM)
+                .tabItem { Label("履歴", systemImage: "clock.arrow.circlepath") }
+        }
+        .overlay {
+            if vm.isLoading {
+                LineStopperWaitingGate(queueTier: remote.lastQueueTier.rawValue, isLoading: $vm.isLoading)
+            } else if pm.isLoading {
+                LoadingOverlay(isLoading: true)
+            }
+        }
+        .overlay {
+            if vm.showHighGate {
+                HighRiskGateView(
+                    queueTier: vm.lastQueueTier,
+                    onContinueStandard: { vm.showHighGate = false },
+                    onUpgradeYearly: {
+                        vm.showHighGate = false
+                        PaywallCoordinator.shared.present(preselect: .yearly)
+                    }
+                )
+            }
         }
     }
 }
@@ -111,6 +262,7 @@ struct LineStopperRootView: View {
 struct LineStopperInputView: View {
     @ObservedObject var vm: LineStopperViewModel
     @ObservedObject var authVM: AuthViewModel
+    var onSaveDraft: (String) -> Void = { _ in }
 
     private var canUseButton: Bool {
         switch authVM.authState {
@@ -129,73 +281,101 @@ struct LineStopperInputView: View {
     }
 
     var body: some View {
-        VStack(spacing: 16) {
-            header
+        ScrollView {
+            VStack(spacing: 16) {
+                header
 
-            if case .failed(let message) = authVM.authState {
-                VStack(spacing: 12) {
-                    Text(message)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                    Button("再試行") {
-                        Task { await authVM.retryAnonymous() }
-                    }
-                    .buttonStyle(.borderedProminent)
-                }
-                .padding()
-                .frame(maxWidth: .infinity)
-                .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16))
-            }
-
-            TextEditor(text: $vm.inputText)
-                .padding(12)
-                .frame(minHeight: 180)
-                .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16))
-                .overlay(alignment: .topLeading) {
-                    if vm.inputText.isEmpty {
-                        Text("ここにLINEを貼り付け")
+                if case .failed(let message) = authVM.authState {
+                    VStack(spacing: 12) {
+                        Text(message)
+                            .font(.subheadline)
                             .foregroundStyle(.secondary)
-                            .padding(.horizontal, 18)
-                            .padding(.vertical, 20)
+                            .multilineTextAlignment(.center)
+                        Button("再試行") {
+                            Task { await authVM.retryAnonymous() }
+                        }
+                        .buttonStyle(.borderedProminent)
                     }
-                }
-
-            if let err = vm.errorMessage {
-                Text(err).font(.caption).foregroundStyle(.red).frame(
-                    maxWidth: .infinity, alignment: .leading)
-            }
-
-            Button {
-                Task {
-                    await authVM.ensureUserBeforeCallable()
-                    guard authVM.uid != nil else {
-                        vm.errorMessage = "接続を確認して再試行してください。"
-                        return
-                    }
-                    await vm.generate()
-                }
-            } label: {
-                Text(buttonLabel)
+                    .padding()
                     .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.borderedProminent)
-            .disabled(
-                !canUseButton || vm.isLoading
-                    || vm.inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16))
+                }
 
-            quotaRow
+                TextEditor(text: $vm.inputText)
+                    .padding(12)
+                    .frame(minHeight: 180)
+                    .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16))
+                    .overlay(alignment: .topLeading) {
+                        if vm.inputText.isEmpty {
+                            Text("ここにLINEを貼り付け")
+                                .foregroundStyle(.secondary)
+                                .padding(.horizontal, 18)
+                                .padding(.vertical, 20)
+                        }
+                    }
+                Text("入力は最大\(InputLimit.lineStopper)文字までです。長文は「要点だけ」残して貼ってください。")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
 
-            Divider().padding(.top, 4)
+                if let err = vm.errorMessage {
+                    Text(err).font(.caption).foregroundStyle(.red).frame(
+                        maxWidth: .infinity, alignment: .leading)
+                }
 
-            if vm.risk != nil {
-                LineStopperResultView(vm: vm)
+                Button {
+                    Task {
+                        await authVM.ensureUserBeforeCallable()
+                        guard authVM.uid != nil else {
+                            vm.errorMessage = "接続を確認して再試行してください。"
+                            return
+                        }
+                        await vm.generate()
+                    }
+                } label: {
+                    Text(buttonLabel)
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(
+                    !canUseButton || vm.isLoading
+                        || vm.inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                quotaRow
+
+                Divider().padding(.top, 4)
+
+                if vm.risk == .high {
+                    HighResultView(
+                        vm: vm,
+                        inputText: vm.inputText.trimmingCharacters(in: .whitespacesAndNewlines),
+                        onSaveDraft: onSaveDraft
+                    )
                     .transition(.opacity.combined(with: .move(edge: .bottom)))
-            }
+                } else if vm.risk == .medium {
+                    MediumResultView(vm: vm)
+                        .transition(.opacity.combined(with: .move(edge: .bottom)))
+                } else if vm.risk == .low {
+                    LowResultView(vm: vm)
+                        .transition(.opacity.combined(with: .move(edge: .bottom)))
+                }
 
-            Spacer(minLength: 8)
+                Spacer(minLength: 8)
+            }
+            .padding()
+            .contentShape(Rectangle())
+            .onTapGesture {
+                UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+            }
         }
-        .padding()
+        .scrollDismissesKeyboard(.interactively)
+        .toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button("完了") {
+                    UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                }
+            }
+        }
         .animation(.easeInOut(duration: 0.2), value: vm.risk)
     }
 
@@ -312,6 +492,73 @@ struct LineStopperResultView: View {
     }
 }
 
+// MARK: - 待機オーバーレイ（Service の progress と完全同期）
+
+enum WaitingPhase {
+    case initial
+    case after5s
+}
+
+struct AIWaitingOverlay: View {
+    let phase: WaitingPhase
+    let primaryTitle: String
+    let secondaryTitle: String
+    let progressHint: String
+    var waitingSeconds: Int? = nil
+    let onKeepWaiting: () -> Void
+    let onLater: () -> Void
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.35).ignoresSafeArea()
+            VStack(spacing: 20) {
+                ProgressView()
+                    .scaleEffect(1.2)
+                    .tint(.white)
+                Text(primaryTitle)
+                    .font(.headline)
+                    .foregroundStyle(.white)
+                Text(secondaryTitle)
+                    .font(.subheadline)
+                    .foregroundStyle(.white.opacity(0.9))
+                Text(progressHint)
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.8))
+                if phase == .after5s {
+                    VStack(spacing: 12) {
+                        HStack(spacing: 16) {
+                            Button(action: onKeepWaiting) {
+                                Text("待つ")
+                                    .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .tint(.white)
+                            Button(action: onLater) {
+                                Text("あとで確認")
+                                    .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.bordered)
+                            .tint(.white)
+                        }
+                        Button(action: {
+                            PaywallCoordinator.shared.present()
+                        }) {
+                            Text("今すぐ結果を見る（プレミアム）")
+                                .font(.subheadline.weight(.medium))
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(.white)
+                    }
+                    .padding(.horizontal, 32)
+                    .padding(.top, 8)
+                }
+            }
+            .padding(32)
+        }
+    }
+}
+
 // MARK: - Shared
 
 private struct LoadingOverlay: View {
@@ -325,3 +572,4 @@ private struct LoadingOverlay: View {
         }
     }
 }
+

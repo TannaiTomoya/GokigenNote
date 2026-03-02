@@ -5,6 +5,7 @@
 //  Created by 丹内智弥 on 2025/11/19.
 //
 
+@preconcurrency import Dispatch
 import Foundation
 import SwiftUI
 import Combine
@@ -117,6 +118,57 @@ final class GokigenViewModel: ObservableObject {
     @Published private(set) var isLoadingEntries: Bool = false
     @Published private(set) var canLoadMore: Bool = true
     @Published private(set) var isSyncing: Bool = false
+    /// 無料ユーザー連打制限: クールダウン終了時刻（nil または 過ぎていればボタン有効）
+    @Published var reformulateCooldownEndAt: Date?
+
+    /// 同一入力あたり再生成2回まで（無料UX）
+    private var lastReformulateInputText: String?
+    private var regenerateCountForCurrentInput: Int = 0
+
+    /// 混雑モーダル「再試行」用。RetryBus.reformulate で retryReformulateIfPossible が呼ばれる
+    private struct PendingReformulate {
+        let text: String
+        let context: ReformulationContext
+        let draftEntryId: String?
+        let cacheKey: String
+    }
+    private var pendingReformulate: PendingReformulate?
+    private var retryObserver: NSObjectProtocol?
+
+    /// defer 用。MainActor で後から実行したい処理を同期クロージャで渡す（defer の async 推論を防ぐ）。
+    private nonisolated func runOnMainActorLater(_ body: @escaping () -> Void) {
+        DispatchQueue.main.async {
+            MainActor.assumeIsolated {
+                body()
+            }
+        }
+    }
+
+    /// 同期メソッドにし、addObserver の using: に渡すクロージャを非同期推論されないようにする。
+    private func handleRetryRequested(_ note: Notification) {
+        guard let action = RetryBus.parseAction(note), action == .reformulate else { return }
+        Task { await self.retryReformulateIfPossible() }
+    }
+
+    @MainActor
+    init() {
+        self.currentPrompt = PromptProvider.random()
+        self.entries = []
+        self.retryObserver = NotificationCenter.default.addObserver(
+            forName: RetryBus.retryRequested,
+            object: nil,
+            queue: .main,
+            using: { [weak self] note in
+                self?.handleRetryRequested(note)
+            }
+        )
+    }
+
+    deinit {
+        if let o = retryObserver {
+            NotificationCenter.default.removeObserver(o)
+        }
+    }
 
     private enum Copy {
         static let saveSuccess = "あなたの今が書き留められたよ。"
@@ -125,18 +177,25 @@ final class GokigenViewModel: ObservableObject {
         static let reformulationError = "言い換えに失敗しました。もう一度お試しください。"
         static let dailyLimitReached = "本日の利用回数に達したため、簡易表示しています。"
         static let fallbackReformulation = "通信のため簡易表示しています。"
+        static let reformulateRegenerateLimit = "この文章の再生成は2回までです。"
     }
 
     /// 1日あたりの Gemini API 呼び出し上限（Phase 2）
     private static let dailyAPICallLimit = 30
     /// 言い換えキャッシュの最大件数（Phase 1）
     private static let reformulationCacheMaxCount = 50
+    /// 同一入力＋同一コンテキストで1分以内は完全キャッシュ（連打ユーザーでコスト削減）
+    private static let reformulationCacheTTLSeconds: TimeInterval = 60
     /// メモリに保持する entries の上限（無制限成長によるメモリキル防止）
     private static let maxEntriesInMemory = 300
     /// UserDefaults に保存する件数（起動時の読み込み負荷軽減）
     private static let maxEntriesToCache = 200
 
-    private var reformulationCache: [String: String] = [:]
+    private struct ReformulationCacheEntry {
+        let value: String
+        let createdAt: Date
+    }
+    private var reformulationCache: [String: ReformulationCacheEntry] = [:]
     private var reformulationCacheOrder: [String] = []
     private var hasShownFirstReformulationSuccess = false
 
@@ -252,7 +311,7 @@ final class GokigenViewModel: ObservableObject {
         "\(trimmed)|\(reformulationPurpose.rawValue)|\(reformulationAudience.rawValue)|\(reformulationTone.rawValue)|\(selectedScene.rawValue)"
     }
 
-    /// 言い換え結果をキャッシュに追加（最大件数で古いものを削除）（Phase 1）
+    /// 言い換え結果をキャッシュに追加（最大件数で古いものを削除・TTL 1分）
     private func setReformulationCache(cacheKey: String, result: String) {
         if reformulationCacheOrder.count >= Self.reformulationCacheMaxCount, let first = reformulationCacheOrder.first {
             reformulationCacheOrder.removeFirst()
@@ -261,7 +320,18 @@ final class GokigenViewModel: ObservableObject {
         if !reformulationCacheOrder.contains(cacheKey) {
             reformulationCacheOrder.append(cacheKey)
         }
-        reformulationCache[cacheKey] = result
+        reformulationCache[cacheKey] = ReformulationCacheEntry(value: result, createdAt: Date())
+    }
+
+    /// キャッシュ取得。1分以内のエントリのみ有効（超過は未ヒット扱い・エントリ削除）
+    private func getReformulationCache(cacheKey: String, now: Date = Date()) -> String? {
+        guard let entry = reformulationCache[cacheKey] else { return nil }
+        if now.timeIntervalSince(entry.createdAt) > Self.reformulationCacheTTLSeconds {
+            reformulationCache.removeValue(forKey: cacheKey)
+            reformulationCacheOrder.removeAll { $0 == cacheKey }
+            return nil
+        }
+        return entry.value
     }
 
     private let persistence = Persistence.shared
@@ -295,12 +365,6 @@ final class GokigenViewModel: ObservableObject {
             "エネルギーが出ず、誰かに頼りたい気持ちが強かった。"
         ]
     ]
-
-    @MainActor
-    init() {
-        self.currentPrompt = PromptProvider.random()
-        self.entries = []
-    }
 
     func setUserId(_ userId: String) {
         guard currentUserId != userId else { return }
@@ -342,7 +406,7 @@ final class GokigenViewModel: ObservableObject {
         isFlushingPending = true
 
         Task {
-            defer { Task { @MainActor in self.isFlushingPending = false } }
+            defer { runOnMainActorLater { [weak self] in self?.isFlushingPending = false } }
 
             let pending = persistence.loadPendingEntryIds(userId: uid)
             guard !pending.isEmpty else { return }
@@ -489,7 +553,7 @@ final class GokigenViewModel: ObservableObject {
 
     @MainActor
     func buildEmpathyDraft(forceRefresh: Bool = false) {
-        let trimmed = draftText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmed = InputLimit.clampText(draftText, maxChars: InputLimit.empathy)
         guard !trimmed.isEmpty else {
             publishError(message: Copy.emptyDraft)
             return
@@ -533,7 +597,7 @@ final class GokigenViewModel: ObservableObject {
         lastGeminiRequest = trimmed
 
         Task { [trimmed, token] in
-            defer { Task { @MainActor in self.endAIRequest(token) } }
+            defer { runOnMainActorLater { [weak self] in self?.endAIRequest(token) } }
 
             // P1A: consumeRewrite でサーバが回数制限・消費。allowed なら AI 実行。
             do {
@@ -550,8 +614,17 @@ final class GokigenViewModel: ObservableObject {
 
                 if !quota.allowed {
                     await MainActor.run {
-                        self.publishError(message: "回数上限に達しました。プレミアムで無制限にできます。")
-                        PaywallCoordinator.shared.present()
+                        guard self.empathyRequestID == token.id else { return }
+                        if let sec = quota.cooldownRemainingSeconds, sec > 0 {
+                            self.reformulateCooldownEndAt = Date().addingTimeInterval(TimeInterval(sec))
+                            self.publishError(message: "あと\(sec)秒お待ちください")
+                        } else if quota.paywall, quota.reason == "quota_exceeded" {
+                            PaywallCoordinator.shared.presentQuotaExceeded()
+                        } else {
+                            self.publishError(message: "混雑中です。少し待ってからもう一度お試しください。")
+                            let tier: QueueTier = PremiumManager.shared.effectivePlan.serverPlanValue == "subscription_yearly" ? .priority : .standard
+                            PaywallCoordinator.shared.presentCongestion(tier: tier, retryAfterSeconds: nil, retryAction: .empathy)
+                        }
                     }
                     return
                 }
@@ -560,6 +633,8 @@ final class GokigenViewModel: ObservableObject {
                     guard self.empathyRequestID == token.id else { return }
                     if QuotaService.isUnauthenticated(error) {
                         self.publishError(message: "ログインが必要です。")
+                    } else if CongestionGateHandler.presentIfNeeded(error: error, op: .empathy, payloadKey: trimmed) {
+                        self.publishError(message: "混雑中です。少し待ってからもう一度お試しください。")
                     } else {
                         self.publishError(message: "回数確認に失敗しました。通信状況を確認してください。")
                     }
@@ -591,7 +666,7 @@ final class GokigenViewModel: ObservableObject {
     
     @MainActor
     func reformulateText() {
-        let trimmed = draftText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmed = InputLimit.clampText(draftText, maxChars: InputLimit.reformulate)
         guard !trimmed.isEmpty else {
             publishError(message: Copy.emptyDraft)
             return
@@ -603,12 +678,13 @@ final class GokigenViewModel: ObservableObject {
             purpose: reformulationPurpose,
             audience: reformulationAudience,
             tone: reformulationTone,
-            scene: selectedScene
+            scene: selectedScene,
+            isYearly: PremiumManager.shared.effectivePlan.isYearly
         )
         let cacheKey = reformulationCacheKey(trimmed: trimmed)
 
-        // キャッシュヒットは0消費
-        if let cached = reformulationCache[cacheKey] {
+        // キャッシュヒットは0消費（1分TTL）
+        if let cached = getReformulationCache(cacheKey: cacheKey) {
             reformulatedText = cached
             return
         }
@@ -632,13 +708,30 @@ final class GokigenViewModel: ObservableObject {
             return
         }
 
+        // 同一入力あたり再生成は最大2回まで（無料UX・連打防止）
+        if trimmed != lastReformulateInputText {
+            lastReformulateInputText = trimmed
+            regenerateCountForCurrentInput = 0
+        }
+        regenerateCountForCurrentInput += 1
+        if regenerateCountForCurrentInput > 2 {
+            publishError(message: Copy.reformulateRegenerateLimit)
+            return
+        }
+
         guard let token = beginAIRequest(kind: .reformulation) else { return }
         recordGeminiAPICall()
 
-        Task { [trimmed, token, context, cacheKey] in
-            defer { Task { @MainActor in self.endAIRequest(token) } }
+        pendingReformulate = PendingReformulate(
+            text: trimmed,
+            context: context,
+            draftEntryId: draftEntryId,
+            cacheKey: cacheKey
+        )
 
-            // P1A: consumeRewrite でサーバが回数制限・消費。allowed なら Gemini 実行。
+        Task { [trimmed, token, context, cacheKey] in
+            defer { runOnMainActorLater { [weak self] in self?.endAIRequest(token) } }
+
             do {
                 let draftId = await MainActor.run { self.draftEntryId }
                 let quota = try await QuotaService.shared.consumeRewrite(
@@ -653,8 +746,17 @@ final class GokigenViewModel: ObservableObject {
 
                 if !quota.allowed {
                     await MainActor.run {
-                        self.publishError(message: "回数上限に達しました。プレミアムで無制限にできます。")
-                        PaywallCoordinator.shared.present()
+                        guard self.reformulationRequestID == token.id else { return }
+                        if let sec = quota.cooldownRemainingSeconds, sec > 0 {
+                            self.reformulateCooldownEndAt = Date().addingTimeInterval(TimeInterval(sec))
+                            self.publishError(message: "あと\(sec)秒お待ちください")
+                        } else if quota.paywall, quota.reason == "quota_exceeded" {
+                            PaywallCoordinator.shared.presentQuotaExceeded()
+                        } else {
+                            self.publishError(message: "混雑中です。少し待ってからもう一度お試しください。")
+                            let tier: QueueTier = PremiumManager.shared.effectivePlan.serverPlanValue == "subscription_yearly" ? .priority : .standard
+                            PaywallCoordinator.shared.presentCongestion(tier: tier, retryAfterSeconds: nil, retryAction: .reformulate)
+                        }
                     }
                     return
                 }
@@ -663,6 +765,8 @@ final class GokigenViewModel: ObservableObject {
                     guard self.reformulationRequestID == token.id else { return }
                     if QuotaService.isUnauthenticated(error) {
                         self.publishError(message: "ログインが必要です。")
+                    } else if CongestionGateHandler.presentIfNeeded(error: error, op: .reformulate, payloadKey: cacheKey) {
+                        self.publishError(message: "混雑中です。少し待ってからもう一度お試しください。")
                     } else {
                         self.publishError(message: "回数確認に失敗しました。通信状況を確認してください。")
                     }
@@ -670,32 +774,65 @@ final class GokigenViewModel: ObservableObject {
                 return
             }
 
-            // OKなら Gemini
             do {
-                let reformulated = try await geminiService.reformulateText(for: trimmed, context: context)
-                await MainActor.run {
-                    guard self.reformulationRequestID == token.id else { return }
-                    self.reformulatedText = reformulated
-                    self.setReformulationCache(cacheKey: cacheKey, result: reformulated)
-                    if !self.hasShownFirstReformulationSuccess {
-                        self.hasShownFirstReformulationSuccess = true
-                        self.lastSuccessMessage = "そのまま使えます"
-                    }
-                    SpeechPlayer.shared.speak(reformulated)
-                    self.saveEntryAfterReformulateSuccess(rawText: trimmed, rewriteText: reformulated)
-                }
+                try await performReformulate(text: trimmed, context: context, cacheKey: cacheKey, token: token)
             } catch {
                 print("[Gemini] ERROR reformulateText: \(error)")
                 await MainActor.run {
                     guard self.reformulationRequestID == token.id else { return }
+                    if CongestionGateHandler.presentIfNeeded(error: error, op: .reformulate, payloadKey: cacheKey) {
+                        self.publishError(message: "混雑中のため、言い換えに時間がかかっています。少し待ってからもう一度お試しください。")
+                        return
+                    }
                     let fallback = EmpathyEngine.reformulateLocal(original: trimmed)
-                    self.reformulatedText = fallback
+                    let textToShow = fallback.isEmpty
+                        ? "変換を取得できませんでした。しばらくしてからやり直してください。"
+                        : fallback
+                    self.reformulatedText = textToShow
                     self.publishError(message: Copy.fallbackReformulation)
-                    SpeechPlayer.shared.speak(fallback)
-                    self.saveEntryAfterReformulateSuccess(rawText: trimmed, rewriteText: fallback)
+                    self.saveEntryAfterReformulateSuccess(rawText: trimmed, rewriteText: textToShow)
                 }
             }
         }
+    }
+
+    /// 言い換えの実実行（callable 呼び出し＋UI反映）。reformulateText と retryReformulateIfPossible から利用。
+    private func performReformulate(text: String, context: ReformulationContext, cacheKey: String, token: AIRequestToken) async throws {
+        let reformulated = try await geminiService.reformulateText(for: text, context: context)
+        await MainActor.run {
+            guard self.reformulationRequestID == token.id else { return }
+            self.reformulatedText = reformulated
+            self.setReformulationCache(cacheKey: cacheKey, result: reformulated)
+            if !self.hasShownFirstReformulationSuccess {
+                self.hasShownFirstReformulationSuccess = true
+                self.lastSuccessMessage = "そのまま使えます"
+            }
+            self.saveEntryAfterReformulateSuccess(rawText: text, rewriteText: reformulated)
+        }
+    }
+
+    /// RetryBus.reformulate 受信時に呼ばれる。pending があれば performReformulate を再実行。
+    @MainActor
+    private func retryReformulateIfPossible() async {
+        guard let pending = pendingReformulate else { return }
+        guard let token = beginAIRequest(kind: .reformulation) else { return }
+        defer { endAIRequest(token) }
+
+        do {
+            try await performReformulate(text: pending.text, context: pending.context, cacheKey: pending.cacheKey, token: token)
+        } catch {
+            if CongestionGateHandler.presentIfNeeded(error: error, op: .reformulate, payloadKey: pending.cacheKey) {
+                publishError(message: "混雑中です。少し待ってからもう一度お試しください。")
+            } else {
+                publishError(message: "言い換えに失敗しました。もう一度お試しください。")
+            }
+        }
+    }
+
+    /// クールダウン終了時に View から呼ぶ（タイマーで1秒ごとなど）
+    func clearReformulateCooldownIfNeeded() {
+        guard let end = reformulateCooldownEndAt, Date() >= end else { return }
+        reformulateCooldownEndAt = nil
     }
 
     /// 生成成功後に同一 draft doc へ upsert。一覧追加・入力クリアはしない。
@@ -719,7 +856,8 @@ final class GokigenViewModel: ObservableObject {
             purpose: reformulationPurpose,
             audience: reformulationAudience,
             tone: reformulationTone,
-            scene: selectedScene
+            scene: selectedScene,
+            isYearly: PremiumManager.shared.effectivePlan.isYearly
         )
         var client: [String: Any] = ["platform": "iOS"]
         if let v = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String {
@@ -1016,3 +1154,7 @@ final class GokigenViewModel: ObservableObject {
         return json
     }
 }
+
+
+
+

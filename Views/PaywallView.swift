@@ -16,6 +16,7 @@ private enum LegalSheet: Identifiable {
 struct PaywallView: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject private var pm = PremiumManager.shared
+    @ObservedObject private var coordinator = PaywallCoordinator.shared
     @State private var legalSheet: LegalSheet?
 
     var body: some View {
@@ -69,12 +70,19 @@ struct PaywallView: View {
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
 
-            Text("無料プラン：1日10回まで")
+            Text("無料プラン：初日20回・2日目以降10回まで")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
 
             HStack {
-                Text("現在: \(planText(pm.effectivePlan))")
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("現在: \(planText(pm.effectivePlan))")
+                    if pm.effectivePlan.isYearly {
+                        Text("待機なし（即結果）・優先処理")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
                 Spacer()
                 VStack(alignment: .trailing, spacing: 2) {
                     Text("AI枠: \(pm.remainingRewriteQuotaText)")
@@ -92,10 +100,29 @@ struct PaywallView: View {
     }
 
     private var featureList: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 12) {
             Text("・言い換え無制限（サブスク）／月200回（買い切り）")
             Text("・共感生成無制限（サブスク）／月200回（買い切り）")
             Text("・思考整理を加速")
+            Text("・年額プラン：待機なし（即結果）・HIGH時の改善精度UP")
+                .foregroundStyle(pm.effectivePlan.isYearly ? .primary : .secondary)
+
+            VStack(alignment: .leading, spacing: 12) {
+                Text("優先処理で待ち時間を短縮")
+                    .font(.subheadline.weight(.semibold))
+                Text("混雑時でも優先キューで高速処理されます。感情が高ぶっている時に、すぐ使える安心を。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 8) {
+                    Label("優先キュー（混雑時も高速）", systemImage: "bolt.fill")
+                    Label("履歴の傾向分析", systemImage: "chart.bar")
+                    Label("回数上限に余裕", systemImage: "infinity")
+                }
+                .font(.subheadline)
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
         }
         .font(.subheadline)
         .padding()
@@ -130,9 +157,12 @@ struct PaywallView: View {
         }
     }
 
-    /// 推し商品（存在する中で優先：年額 → 月額 → 買い切り）。該当なしなら nil
+    /// 推し商品。preselect 優先 → 年額 → 月額 → 買い切り。該当なしなら nil
     private var featuredProductID: String? {
         let ids = Set(pm.availableProducts.map(\.id))
+        if coordinator.preselect == .yearly, ids.contains(ProductID.premiumYearly) { return ProductID.premiumYearly }
+        if coordinator.preselect == .monthly, ids.contains(ProductID.premiumMonthly) { return ProductID.premiumMonthly }
+        if coordinator.preselect == .lifetime, ids.contains(ProductID.lifetime) { return ProductID.lifetime }
         if ids.contains(ProductID.premiumYearly) { return ProductID.premiumYearly }
         if ids.contains(ProductID.premiumMonthly) { return ProductID.premiumMonthly }
         if ids.contains(ProductID.lifetime) { return ProductID.lifetime }
@@ -251,3 +281,4 @@ private struct PaywallProductButtons: View {
         }
     }
 }
+

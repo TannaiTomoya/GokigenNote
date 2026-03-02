@@ -1,11 +1,14 @@
 import { createHash } from "crypto";
 import * as logger from "firebase-functions/logger";
-import { onCall, HttpsError } from "firebase-functions/v2/https";
+import { onCall, onRequest, HttpsError } from "firebase-functions/v2/https";
 import { initializeApp } from "firebase-admin/app";
 import { getFirestore, FieldValue, Timestamp } from "firebase-admin/firestore";
 
 // jose は JWS/JWT 検証に使用（Appleの署名検証で必須）
 import { decodeProtectedHeader, importX509, jwtVerify } from "jose";
+
+import { consumeAiLimits, getCurrentDetails, tierForServerPlan, type AiOp } from "./rateLimit";
+import { enqueueLineStopperJob, enqueueAiJob as enqueueAiJobTask, type AiJobOp } from "./tasks";
 
 initializeApp();
 const db = getFirestore();
@@ -32,10 +35,24 @@ const ProductID = {
   lifetime: "gokigen.lifetime",
 } as const;
 
-/** 回数制限（P1A） */
-const Limits = {
-  freeDaily: 10,
-  lifetimeMonthly: 200,
+/** 入力文字数上限（コスト防衛）。サーバーで強制トリム（クライアントを信用しない） */
+const MAX_CHARS = {
+  lineStopper: 600,
+  reformulate: 400,
+  empathy: 800,
+} as const;
+
+function clampText(s: string | null | undefined, maxChars: number): string {
+  const t = String(s ?? "").trim();
+  if (t.length <= maxChars) return t;
+  return t.slice(0, maxChars);
+}
+
+/** Gemini 出力トークン上限（コスト・暴走防止）。短いほどコスト削減・品質安定。 */
+const MAX_OUTPUT_TOKENS = {
+  lineStopper: 180,
+  reformulate: 120,
+  empathy: 220,
 } as const;
 
 /**
@@ -68,22 +85,6 @@ function assertAuthed(context: any): string {
   const uid = context.auth?.uid;
   if (!uid) throw new HttpsError("unauthenticated", "Authentication required.");
   return uid;
-}
-
-function pad2(n: number) {
-  return n < 10 ? `0${n}` : `${n}`;
-}
-
-function dayKeyJST(now = new Date()): string {
-  // まずは単純にサーバー時刻UTCを使う（P1BでJST厳密化してもOK）
-  // JST基準にしたいなら +9h して日付を切る。
-  const jst = new Date(now.getTime() + 9 * 60 * 60 * 1000);
-  return `${jst.getUTCFullYear()}-${pad2(jst.getUTCMonth() + 1)}-${pad2(jst.getUTCDate())}`;
-}
-
-function monthKeyJST(now = new Date()): string {
-  const jst = new Date(now.getTime() + 9 * 60 * 60 * 1000);
-  return `${jst.getUTCFullYear()}-${pad2(jst.getUTCMonth() + 1)}`;
 }
 
 /** 秒（10桁）ならミリ秒に変換。effectiveUntil は常に ms で保存・比較する */
@@ -314,6 +315,7 @@ export const syncEntitlements = onCall(
         plan: "free",
         effectiveUntil: null,
         ownedProductIDs: [],
+        queueTier: "standard",
         reason: "no_accepted_products",
         verifiedJwsCount,
         acceptedCount,
@@ -344,6 +346,7 @@ export const syncEntitlements = onCall(
       plan,
       effectiveUntil: effectiveUntilMs,
       ownedProductIDs: activeProductIDs,
+      queueTier: tierForServerPlan(plan),
       reason: "ok",
       verifiedJwsCount,
       acceptedCount,
@@ -353,10 +356,8 @@ export const syncEntitlements = onCall(
 );
 
 /**
- * 2) consumeRewrite
- * AIを叩く直前に必ず呼ぶ
- * - entitlements/current を見て plan を確定
- * - usageDaily / usageMonthly を transaction でインクリメント（allowed の時だけ）
+ * 2) consumeRewrite（読取のみ）。加算は reformulate/empathy 呼び出し時の consumeAiLimits で行う。
+ * 返却は RateLimitDetails に揃え、iOS で共通表示できるようにする。
  */
 export const consumeRewrite = onCall(
   { region: "asia-northeast1" },
@@ -369,135 +370,14 @@ export const consumeRewrite = onCall(
     }
 
     const { plan, effectiveUntil } = await getCurrentPlan(uid);
-
-    // サブスクは「状態」で判定。期限切れ or 無効な effectiveUntil なら free に落とす
     let actualPlan: Plan = plan;
-    let subscriptionDenyReason: string | null = null;
     if (plan === "subscription_monthly" || plan === "subscription_yearly") {
-      if (effectiveUntil == null || effectiveUntil === 0) {
+      if (effectiveUntil == null || effectiveUntil === 0 || effectiveUntil < Date.now()) {
         actualPlan = "free";
-        subscriptionDenyReason = "missing_until";
-      } else {
-        const nowMs = Date.now();
-        if (effectiveUntil < nowMs) {
-          actualPlan = "free";
-        }
       }
     }
 
-    // 無制限（有効なサブスクのみ）
-    if (
-      actualPlan === "subscription_monthly" ||
-      actualPlan === "subscription_yearly"
-    ) {
-      return {
-        allowed: true,
-        plan: actualPlan,
-        limit: null,
-        used: null,
-        remaining: null,
-        resetKey: null,
-        reason: "active_subscription",
-      };
-    }
-
-    const now = new Date();
-
-    if (actualPlan === "free") {
-      const key = dayKeyJST(now);
-      const ref = db.doc(`users/${uid}/usageDaily/${key}`);
-
-      const result = await db.runTransaction(async (txn) => {
-        const snap = await txn.get(ref);
-        const used = (snap.exists ? (snap.data() as any).rewriteUsed : 0) ?? 0;
-
-        if (used >= Limits.freeDaily) {
-          return {
-            allowed: false,
-            plan: actualPlan,
-            limit: Limits.freeDaily,
-            used,
-            remaining: 0,
-            resetKey: key,
-            reason: "quota_exceeded",
-            paywall: true,
-          };
-        }
-
-        txn.set(
-          ref,
-          {
-            rewriteUsed: used + 1,
-            updatedAt: FieldValue.serverTimestamp(),
-          },
-          { merge: true }
-        );
-
-        return {
-          allowed: true,
-          plan: actualPlan,
-          limit: Limits.freeDaily,
-          used: used + 1,
-          remaining: Math.max(0, Limits.freeDaily - (used + 1)),
-          resetKey: key,
-          reason: subscriptionDenyReason ?? "free_daily",
-        };
-      });
-
-      return result;
-    }
-
-    // lifetime（月次制限）
-    if (actualPlan === "lifetime") {
-      const key = monthKeyJST(now);
-      const ref = db.doc(`users/${uid}/usageMonthly/${key}`);
-
-      const result = await db.runTransaction(async (txn) => {
-        const snap = await txn.get(ref);
-        const used = (snap.exists ? (snap.data() as any).rewriteUsed : 0) ?? 0;
-
-        if (used >= Limits.lifetimeMonthly) {
-          return {
-            allowed: false,
-            plan: actualPlan,
-            limit: Limits.lifetimeMonthly,
-            used,
-            remaining: 0,
-            resetKey: key,
-            reason: "quota_exceeded",
-            paywall: true,
-          };
-        }
-
-        txn.set(
-          ref,
-          {
-            rewriteUsed: used + 1,
-            updatedAt: FieldValue.serverTimestamp(),
-          },
-          { merge: true }
-        );
-
-        return {
-          allowed: true,
-          plan: actualPlan,
-          limit: Limits.lifetimeMonthly,
-          used: used + 1,
-          remaining: Math.max(0, Limits.lifetimeMonthly - (used + 1)),
-          resetKey: key,
-        };
-      });
-
-      return result;
-    }
-
-    // ここに来るなら free 扱いに倒す（安全側）
-    return {
-      allowed: false,
-      plan: "free",
-      reason: "plan_unknown",
-      paywall: true,
-    };
+    return await getCurrentDetails(uid, actualPlan, op as AiOp);
   }
 );
 
@@ -542,10 +422,189 @@ export const consumeLineStopper = onCall(
   }
 );
 
+/**
+ * enqueueLineStopper: 年額は同期実行（キュースキップ）、それ以外は jobs + Cloud Tasks で非同期。
+ * 返却: yearly → { status: "DONE", mode: "sync", queueTier, result }; 他 → { status: "QUEUED", mode: "queued", queueTier, jobId }
+ */
+export const enqueueLineStopper = onCall(
+  { region: "asia-northeast1" },
+  async (request) => {
+    const uid = assertAuthed(request);
+
+    const text = clampText(request.data?.text, MAX_CHARS.lineStopper);
+    if (!text) throw new HttpsError("invalid-argument", "text is required");
+
+    const { plan, effectiveUntil } = await getCurrentPlan(uid);
+    let actualPlan: Plan = plan;
+    if (plan === "subscription_monthly" || plan === "subscription_yearly") {
+      if (effectiveUntil == null || effectiveUntil === 0 || effectiveUntil < Date.now()) {
+        actualPlan = "free";
+      }
+    }
+
+    const limits = await consumeAiLimits(uid, actualPlan, "lineStopper");
+    if (!limits.allowed) {
+      throw new HttpsError("resource-exhausted", limits.reason ?? "resource-exhausted", limits);
+    }
+
+    const queueTier = limits.tier;
+
+    // 年額は同期で完了（キューをスキップ）
+    if (actualPlan === "subscription_yearly") {
+      const apiKey = process.env.GEMINI_API_KEY;
+      if (!apiKey) {
+        logger.warn("GEMINI_API_KEY not set, yearly sync fallback");
+        const result = safeFallbackLineStopper(text);
+        return { status: "DONE", mode: "sync", queueTier, result, limits };
+      }
+      try {
+        const prompt = buildLineStopperPrompt(text);
+        const raw = await callGeminiText(prompt, apiKey, 0.2, MAX_OUTPUT_TOKENS.lineStopper);
+        const jsonStr = extractBraceBlock(raw) ?? raw.trim();
+        const obj = JSON.parse(jsonStr) as unknown;
+        const result = sanitizeAndForceLineStopper(obj);
+        return { status: "DONE", mode: "sync", queueTier, result, limits };
+      } catch (e) {
+        logger.error("yearly sync lineStopper failed", e);
+        const result = safeFallbackLineStopper(text);
+        return { status: "DONE", mode: "sync", queueTier, result, limits };
+      }
+    }
+
+    // それ以外は従来通り enqueue（jobs + tasks）
+    const jobRef = db.collection("jobs").doc();
+    const jobId = jobRef.id;
+
+    await jobRef.set({
+      uid,
+      plan: actualPlan,
+      status: "QUEUED",
+      createdAt: FieldValue.serverTimestamp(),
+      queueTier,
+      textPreview: text.slice(0, 60),
+    });
+
+    let taskName = "";
+    try {
+      taskName = await enqueueLineStopperJob({ jobId, uid, plan: actualPlan, text, queueTier });
+    } catch (e) {
+      logger.error("enqueueLineStopperJob failed", e);
+      await jobRef.set({ status: "FAILED", error: "ENQUEUE_FAILED" }, { merge: true });
+      throw new HttpsError("internal", "enqueue failed");
+    }
+
+    await jobRef.set({ taskName }, { merge: true });
+    return { status: "QUEUED", mode: "queued", tier: limits.tier, queueTier, jobId, limits };
+  }
+);
+
+const AI_JOB_OPS: AiJobOp[] = ["lineStopper", "rewrite", "empathy"];
+
+/**
+ * enqueueAiJob: 3機能共通のキュー投入（lineStopper / rewrite / empathy）
+ * レート制限消費 → jobs 作成 → Cloud Tasks 投入 → jobId 返却
+ */
+export const enqueueAiJob = onCall(
+  { region: "asia-northeast1" },
+  async (request) => {
+    const uid = assertAuthed(request);
+
+    const op = request.data?.op as string | undefined;
+    if (!op || !AI_JOB_OPS.includes(op as AiJobOp)) {
+      throw new HttpsError("invalid-argument", "op must be one of: lineStopper, rewrite, empathy");
+    }
+
+    const maxChars =
+      op === "lineStopper"
+        ? MAX_CHARS.lineStopper
+        : op === "rewrite"
+          ? MAX_CHARS.reformulate
+          : MAX_CHARS.empathy;
+    const text = clampText(request.data?.text, maxChars);
+    if (!text) throw new HttpsError("invalid-argument", "text is required");
+
+    const context = request.data?.context as Record<string, unknown> | undefined;
+
+    const { plan, effectiveUntil } = await getCurrentPlan(uid);
+    let actualPlan: Plan = plan;
+    if (plan === "subscription_monthly" || plan === "subscription_yearly") {
+      if (effectiveUntil == null || effectiveUntil === 0 || effectiveUntil < Date.now()) {
+        actualPlan = "free";
+      }
+    }
+
+    const aiOp: AiOp = op === "rewrite" ? "reformulate" : op === "lineStopper" ? "lineStopper" : "empathy";
+    const limits = await consumeAiLimits(uid, actualPlan, aiOp);
+    if (!limits.allowed) {
+      throw new HttpsError("resource-exhausted", limits.reason ?? "resource-exhausted", limits);
+    }
+
+    const queueTier = limits.tier;
+
+    const jobRef = db.collection("jobs").doc();
+    const jobId = jobRef.id;
+
+    await jobRef.set({
+      uid,
+      plan: actualPlan,
+      op,
+      status: "QUEUED",
+      createdAt: FieldValue.serverTimestamp(),
+      queueTier,
+      textPreview: text.slice(0, 60),
+    });
+
+    let taskName = "";
+    try {
+      taskName = await enqueueAiJobTask({
+        jobId,
+        uid,
+        plan: actualPlan,
+        op: op as AiJobOp,
+        text,
+        context,
+        queueTier,
+      });
+    } catch (e) {
+      logger.error("enqueueAiJob task failed", e);
+      await jobRef.set({ status: "FAILED", error: "ENQUEUE_FAILED" }, { merge: true });
+      throw new HttpsError("internal", "enqueue failed");
+    }
+
+    await jobRef.set({ taskName }, { merge: true });
+    return { jobId, status: "QUEUED", tier: limits.tier, limits };
+  }
+);
+
+/**
+ * getJobResult: jobs/{jobId} の status / result / error を返す（所有者のみ）
+ */
+export const getJobResult = onCall(
+  { region: "asia-northeast1" },
+  async (request) => {
+    const uid = assertAuthed(request);
+    const jobId = String(request.data?.jobId ?? "").trim();
+    if (!jobId) throw new HttpsError("invalid-argument", "jobId is required");
+
+    const snap = await db.collection("jobs").doc(jobId).get();
+    if (!snap.exists) throw new HttpsError("not-found", "job not found");
+
+    const data = snap.data()!;
+    if (data.uid !== uid) throw new HttpsError("permission-denied", "not yours");
+
+    return {
+      status: data.status ?? "UNKNOWN",
+      result: data.result ?? null,
+      error: data.error ?? null,
+      queueTier: data.queueTier ?? "standard",
+    };
+  }
+);
+
 // --- 地雷LINEストッパー: Functions で Gemini を叩く（キーはサーバのみ・RPM はサーバで握る） ---
 
 const LINE_STOPPER_RPM = 4;
-const GEMINI_MODEL = "gemini-2.0-flash";
+const GEMINI_MODEL = "gemini-2.5-flash";
 
 type LineStopperResponse = {
   risk: "LOW" | "MEDIUM" | "HIGH";
@@ -678,12 +737,20 @@ function sanitizeAndForceLineStopper(jsonObj: unknown): LineStopperResponse {
   return { risk, oneLiner, suggestions: suggestions as { label: string; text: string }[] };
 }
 
-/** Gemini 汎用テキスト生成（lineStopper / reformulate 共通） */
-async function callGeminiText(prompt: string, apiKey: string, temperature = 0.2): Promise<string> {
+/** Gemini 汎用テキスト生成。maxOutputTokens は必須（渡し忘れ＝コンパイルエラーでコスト抜け穴を防ぐ） */
+async function callGeminiText(
+  prompt: string,
+  apiKey: string,
+  temperature: number,
+  maxOutputTokens: number
+): Promise<string> {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
   const body = {
     contents: [{ role: "user", parts: [{ text: prompt }] }],
-    generationConfig: { temperature },
+    generationConfig: {
+      temperature,
+      maxOutputTokens,
+    },
   };
 
   const res = await fetch(url, {
@@ -713,7 +780,7 @@ export const lineStopper = onCall(
   async (request) => {
     const uid = assertAuthed(request);
 
-    const inputText = String(request.data?.text ?? "").trim();
+    const inputText = clampText(request.data?.text, MAX_CHARS.lineStopper);
     if (!inputText) {
       throw new HttpsError("invalid-argument", "text required");
     }
@@ -728,7 +795,7 @@ export const lineStopper = onCall(
 
     try {
       const prompt = buildLineStopperPrompt(inputText);
-      const raw = await callGeminiText(prompt, apiKey, 0.2);
+      const raw = await callGeminiText(prompt, apiKey, 0.2, MAX_OUTPUT_TOKENS.lineStopper);
       const jsonStr = extractBraceBlock(raw) ?? raw.trim();
 
       let obj: unknown;
@@ -746,15 +813,301 @@ export const lineStopper = onCall(
   }
 );
 
+/**
+ * lineStopperWorker: Cloud Tasks から呼ばれる HTTP。Gemini 実行 → jobs/{jobId} に結果保存。
+ * 環境変数: GEMINI_API_KEY, WORKER_URL（Tasks 設定用）, TASKS_OIDC_SERVICE_ACCOUNT
+ */
+export const lineStopperWorker = onRequest(
+  { region: "asia-northeast1" },
+  async (req, res) => {
+    try {
+      const payloadB64 = req.body?.payload;
+      if (!payloadB64) {
+        res.status(400).send("missing payload");
+        return;
+      }
+      const decoded = JSON.parse(
+        Buffer.from(payloadB64, "base64").toString("utf8")
+      ) as { jobId: string; uid: string; plan: string; text: string };
+
+      const { jobId, uid, text: rawText } = decoded;
+      if (!jobId || !uid || !rawText) {
+        res.status(400).send("bad job");
+        return;
+      }
+      const text = clampText(rawText, MAX_CHARS.lineStopper);
+
+      const jobRef = db.collection("jobs").doc(jobId);
+      const jobSnap = await jobRef.get();
+      const queueTier = jobSnap.exists ? (jobSnap.data()?.queueTier ?? "standard") : "standard";
+      logger.info("lineStopperWorker start", { jobId, uid, plan: decoded.plan, queueTier });
+
+      const startMs = Date.now();
+      await jobRef.set(
+        {
+          status: "RUNNING",
+          startedAt: FieldValue.serverTimestamp(),
+        },
+        { merge: true }
+      );
+
+      let result: LineStopperResponse = safeFallbackLineStopper("");
+      const apiKey = process.env.GEMINI_API_KEY;
+      if (apiKey) {
+        try {
+          const prompt = buildLineStopperPrompt(text);
+          const raw = await callGeminiText(prompt, apiKey, 0.2, MAX_OUTPUT_TOKENS.lineStopper);
+          const jsonStr = extractBraceBlock(raw) ?? raw.trim();
+          const obj = JSON.parse(jsonStr) as unknown;
+          result = sanitizeAndForceLineStopper(obj);
+        } catch (e) {
+          logger.error("lineStopperWorker Gemini/parse failed", e);
+        }
+      } else {
+        logger.error("GEMINI_API_KEY not set in worker");
+      }
+
+      await jobRef.set(
+        {
+          status: "DONE",
+          finishedAt: FieldValue.serverTimestamp(),
+          result: { ...result, queueTier },
+        },
+        { merge: true }
+      );
+
+      const plan = (decoded as { plan?: string }).plan ?? "free";
+      const latencyMs = Math.round(Date.now() - startMs);
+      const lineCheckRef = db.collection("users").doc(uid).collection("lineChecks").doc(jobId);
+      await lineCheckRef.set(
+        {
+          createdAt: FieldValue.serverTimestamp(),
+          risk: result.risk,
+          oneLiner: result.oneLiner ?? "",
+          suggestions: result.suggestions ?? [],
+          planAtTime: plan,
+          latencyMs,
+          queue: {
+            tier: plan === "subscription_yearly" ? "priority" : "standard",
+            waitedMs: null,
+          },
+        },
+        { merge: true }
+      );
+
+      res.status(200).send("ok");
+    } catch (e) {
+      logger.error("lineStopperWorker failed", e);
+      res.status(500).send("error");
+    }
+  }
+);
+
+// --- aiWorker: lineStopper / rewrite / empathy の共通 HTTP Worker ---
+
+function buildEmpathyPrompt(text: string): string {
+  return `
+あなたは、しんどい人に寄り添う日本語のカウンセラーです。
+
+ユーザーの文章：
+「${text}」
+
+以下の2つを日本語で返してください。
+
+1) 共感メッセージ：
+   ユーザーを否定せず、「がんばりを認める」やさしい言葉。
+
+2) 次の一歩：
+   今日できそうな、ハードルの低い一歩。
+   例：深呼吸を3回する／温かい飲み物を飲む など。
+`.trim();
+}
+
+function parseEmpathyResponse(raw: string): { text: string; nextStep: string } {
+  const trimmed = raw.trim();
+  const match = trimmed.match(/(?:2[)）.]|②)\s*/);
+  if (match && match.index != null && match.index > 0) {
+    const empathy = trimmed.slice(0, match.index).replace(/^[\s\*]*(?:1[)）.]|①)[\s]*/i, "").trim();
+    const nextStep = trimmed.slice(match.index + match[0].length).replace(/^[\s\*]*(?:次の一歩[：:]?)[\s]*/i, "").trim();
+    return {
+      text: empathy || trimmed,
+      nextStep: nextStep || "今日はゆっくり休むだけで十分です。",
+    };
+  }
+  return {
+    text: trimmed,
+    nextStep: "今日はゆっくり休むだけで十分です。",
+  };
+}
+
+type AiWorkerPayload = {
+  jobId: string;
+  uid: string;
+  plan: string;
+  op?: "lineStopper" | "rewrite" | "empathy";
+  text: string;
+  context?: Record<string, unknown>;
+};
+
+export const aiWorker = onRequest(
+  { region: "asia-northeast1" },
+  async (req, res) => {
+    try {
+      const payloadB64 = req.body?.payload;
+      if (!payloadB64) {
+        res.status(400).send("missing payload");
+        return;
+      }
+      const decoded = JSON.parse(
+        Buffer.from(payloadB64, "base64").toString("utf8")
+      ) as AiWorkerPayload;
+
+      const { jobId, uid, text } = decoded;
+      if (!jobId || !uid || !text) {
+        res.status(400).send("bad job");
+        return;
+      }
+
+      const op = decoded.op ?? "lineStopper";
+      const jobRef = db.collection("jobs").doc(jobId);
+      const jobSnap = await jobRef.get();
+      const queueTier = jobSnap.exists ? (jobSnap.data()?.queueTier ?? "standard") : "standard";
+      logger.info("aiWorker start", { jobId, uid, op, plan: decoded.plan, queueTier });
+
+      const startMs = Date.now();
+      await jobRef.set(
+        {
+          status: "RUNNING",
+          startedAt: FieldValue.serverTimestamp(),
+        },
+        { merge: true }
+      );
+
+      const apiKey = process.env.GEMINI_API_KEY;
+      const plan = decoded.plan ?? "free";
+
+      if (op === "lineStopper") {
+        const clampedText = clampText(text, MAX_CHARS.lineStopper);
+        let result: LineStopperResponse = safeFallbackLineStopper("");
+        if (apiKey) {
+          try {
+            const prompt = buildLineStopperPrompt(clampedText);
+            const raw = await callGeminiText(prompt, apiKey, 0.2, MAX_OUTPUT_TOKENS.lineStopper);
+            const jsonStr = extractBraceBlock(raw) ?? raw.trim();
+            const obj = JSON.parse(jsonStr) as unknown;
+            result = sanitizeAndForceLineStopper(obj);
+          } catch (e) {
+            logger.error("aiWorker lineStopper failed", e);
+          }
+        }
+        await jobRef.set(
+          {
+            status: "DONE",
+            finishedAt: FieldValue.serverTimestamp(),
+            result,
+          },
+          { merge: true }
+        );
+        const latencyMs = Math.round(Date.now() - startMs);
+        const lineCheckRef = db.collection("users").doc(uid).collection("lineChecks").doc(jobId);
+        await lineCheckRef.set(
+          {
+            createdAt: FieldValue.serverTimestamp(),
+            risk: result.risk,
+            oneLiner: result.oneLiner ?? "",
+            suggestions: result.suggestions ?? [],
+            planAtTime: plan,
+            latencyMs,
+            queue: {
+              tier: plan === "subscription_yearly" ? "priority" : "standard",
+              waitedMs: null,
+            },
+          },
+          { merge: true }
+        );
+      } else if (op === "rewrite") {
+        const clampedText = clampText(text, MAX_CHARS.reformulate);
+        const ctx = decoded.context ?? {};
+        const scene = String(ctx.scene ?? "仕事");
+        const purpose = String(ctx.purpose ?? "気持ちを伝えたい");
+        const audience = String(ctx.audience ?? "同僚");
+        const tone = String(ctx.tone ?? "柔らかい");
+        const isYearly = ctx.isYearly === true;
+
+        let resultText = clampedText;
+        if (apiKey) {
+          try {
+            const prompt = buildReformulatePrompt(clampedText, scene, purpose, audience, tone, isYearly);
+            const raw = await callGeminiText(prompt, apiKey, 0.3, MAX_OUTPUT_TOKENS.reformulate);
+            resultText = sanitizeReformulateResponse(raw) || clampedText;
+          } catch (e) {
+            logger.error("aiWorker rewrite failed", e);
+          }
+        }
+        await jobRef.set(
+          {
+            status: "DONE",
+            finishedAt: FieldValue.serverTimestamp(),
+            result: { text: resultText },
+          },
+          { merge: true }
+        );
+      } else if (op === "empathy") {
+        const clampedText = clampText(text, MAX_CHARS.empathy);
+        let resultEmpathy = { text: clampedText, nextStep: "今日はゆっくり休むだけで十分です。" };
+        if (apiKey) {
+          try {
+            const prompt = buildEmpathyPrompt(clampedText);
+            const raw = await callGeminiText(prompt, apiKey, 0.3, MAX_OUTPUT_TOKENS.empathy);
+            resultEmpathy = parseEmpathyResponse(raw);
+          } catch (e) {
+            logger.error("aiWorker empathy failed", e);
+          }
+        }
+        await jobRef.set(
+          {
+            status: "DONE",
+            finishedAt: FieldValue.serverTimestamp(),
+            result: { text: resultEmpathy.text, nextStep: resultEmpathy.nextStep },
+          },
+          { merge: true }
+        );
+      } else {
+        await jobRef.set(
+          { status: "FAILED", error: "UNKNOWN_OP" },
+          { merge: true }
+        );
+      }
+
+      res.status(200).send("ok");
+    } catch (e) {
+      logger.error("aiWorker failed", e);
+      res.status(500).send("error");
+    }
+  }
+);
+
 // --- 言い換え: Functions で Gemini を叩く（キーはサーバのみ） ---
 
-function buildReformulatePrompt(text: string, scene: string, purpose: string, audience: string, tone: string): string {
+function buildReformulatePrompt(
+  text: string,
+  scene: string,
+  purpose: string,
+  audience: string,
+  tone: string,
+  isYearly?: boolean
+): string {
+  const premiumNote =
+    isYearly === true
+      ? "\n【優先】相手の立場や文脈を特に丁寧に汲み取り、一度で伝わるよう少しだけ踏み込んだ言い回しを選んでください。"
+      : "";
   return `
 以下の発言を「${scene}」の場面で自然に伝わる表現に言い換えてください。
 
 ・相手に伝わる
 ・誤解されない
 ・簡潔
+${premiumNote}
 
 【追加の指定】
 - 目的：${purpose}
@@ -782,22 +1135,36 @@ function sanitizeReformulateResponse(raw: string): string {
 
 /**
  * reformulate: 言い換え。text + scene/purpose/audience/tone を受け取り、サーバで Gemini 呼び出し。
- * GEMINI_API_KEY は Firebase の環境変数で設定すること。
+ * 冒頭で本番レート制御（quota/{uid} 分・日）を実施。GEMINI_API_KEY は Firebase の環境変数で設定すること。
  */
 export const reformulate = onCall(
   { region: "asia-northeast1" },
   async (request) => {
-    assertAuthed(request);
+    const uid = assertAuthed(request);
 
-    const text = String(request.data?.text ?? "").trim();
+    const text = clampText(request.data?.text, MAX_CHARS.reformulate);
     if (!text) {
       throw new HttpsError("invalid-argument", "text required");
+    }
+
+    const { plan, effectiveUntil } = await getCurrentPlan(uid);
+    let actualPlan: Plan = plan;
+    if (plan === "subscription_monthly" || plan === "subscription_yearly") {
+      if (effectiveUntil == null || effectiveUntil === 0 || effectiveUntil < Date.now()) {
+        actualPlan = "free";
+      }
+    }
+
+    const limits = await consumeAiLimits(uid, actualPlan, "reformulate");
+    if (!limits.allowed) {
+      throw new HttpsError("resource-exhausted", limits.reason ?? "resource-exhausted", limits);
     }
 
     const scene = String(request.data?.scene ?? "仕事");
     const purpose = String(request.data?.purpose ?? "気持ちを伝えたい");
     const audience = String(request.data?.audience ?? "同僚");
     const tone = String(request.data?.tone ?? "柔らかい");
+    const isYearly = request.data?.isYearly === true;
 
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
@@ -806,10 +1173,10 @@ export const reformulate = onCall(
     }
 
     try {
-      const prompt = buildReformulatePrompt(text, scene, purpose, audience, tone);
-      const raw = await callGeminiText(prompt, apiKey, 0.3);
+      const prompt = buildReformulatePrompt(text, scene, purpose, audience, tone, isYearly);
+      const raw = await callGeminiText(prompt, apiKey, 0.3, MAX_OUTPUT_TOKENS.reformulate);
       const result = sanitizeReformulateResponse(raw);
-      return { text: result || text };
+      return { text: result || text, queueTier: limits.tier, limits };
     } catch (e) {
       logger.warn("reformulate Gemini error", e);
       throw new HttpsError("internal", "Reformulation failed.");

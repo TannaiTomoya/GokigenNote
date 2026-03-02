@@ -5,6 +5,7 @@
 //  Created by 丹内智弥 on 2025/11/20.
 //
 
+import Combine
 import Foundation
 
 enum APIKey {

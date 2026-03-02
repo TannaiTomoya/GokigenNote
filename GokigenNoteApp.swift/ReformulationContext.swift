@@ -61,12 +61,14 @@ enum ReformulationTone: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
-/// 言い換え生成に渡すコンテキスト（目的・相手・トーン・場面）
+/// 言い換え生成に渡すコンテキスト（目的・相手・トーン・場面・年額か）
 struct ReformulationContext {
     var purpose: ReformulationPurpose
     var audience: ReformulationAudience
     var tone: ReformulationTone
     var scene: ReformulationScene
+    /// 年額ユーザー向けにプロンプトを強化するか
+    var isYearly: Bool = false
 
     static let `default` = ReformulationContext(
         purpose: .shareFeeling,

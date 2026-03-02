@@ -5,6 +5,7 @@
 //  利用規約（審査用）
 //
 
+import Combine
 import SwiftUI
 
 struct TermsOfServiceView: View {

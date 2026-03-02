@@ -1,6 +1,7 @@
 {
   "images" : [
     {
+      "filename" : "A_high-clarity_iOS_app_icon_design_in_1024x1024_sq-1772342045153 (1).png",
       "idiom" : "universal",
       "platform" : "ios",
       "size" : "1024x1024"
@@ -12,6 +13,7 @@
           "value" : "dark"
         }
       ],
+      "filename" : "A_high-clarity_iOS_app_icon_design_in_1024x1024_sq-1772342045153 (1) 1.png",
       "idiom" : "universal",
       "platform" : "ios",
       "size" : "1024x1024"
@@ -23,6 +25,7 @@
           "value" : "tinted"
         }
       ],
+      "filename" : "A_high-clarity_iOS_app_icon_design_in_1024x1024_sq-1772342045153 (1) 2.png",
       "idiom" : "universal",
       "platform" : "ios",
       "size" : "1024x1024"
