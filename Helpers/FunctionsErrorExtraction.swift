@@ -36,4 +36,15 @@ enum FunctionsErrorExtraction {
         let msg = String(describing: error).lowercased()
         return msg.contains("resource-exhausted")
     }
+
+    /// failed-precondition + free_trial_ended（無料7日経過）かどうか
+    static func isFreeTrialEnded(_ error: Error) -> Bool {
+        let ns = error as NSError
+        if let code = ns.userInfo["code"] as? String, code == "free_trial_ended" { return true }
+        for key in ["details", "data"] {
+            if let details = ns.userInfo[key] as? [String: Any],
+               let code = details["code"] as? String, code == "free_trial_ended" { return true }
+        }
+        return false
+    }
 }

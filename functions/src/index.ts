@@ -35,12 +35,22 @@ const ProductID = {
   lifetime: "gokigen.lifetime",
 } as const;
 
-/** 入力文字数上限（コスト防衛）。サーバーで強制トリム（クライアントを信用しない） */
+/** 入力文字数上限（コスト防衛）。無料 400 / 有料 800。サーバーで強制トリム（クライアントを信用しない） */
+const MAX_CHARS_FREE = 400;
+const MAX_CHARS_PAID = 800;
+/** 言い換え・危険度以外（共感など）は固定 */
 const MAX_CHARS = {
-  lineStopper: 600,
-  reformulate: 400,
+  lineStopper: 600, // 旧値・参照時は getMaxCharsLineStopper(plan) を優先
+  reformulate: 400, // 旧値・参照時は getMaxCharsReformulate(plan) を優先
   empathy: 800,
 } as const;
+
+function getMaxCharsReformulate(plan: Plan): number {
+  return plan === "free" ? MAX_CHARS_FREE : MAX_CHARS_PAID;
+}
+function getMaxCharsLineStopper(plan: Plan): number {
+  return plan === "free" ? MAX_CHARS_FREE : MAX_CHARS_PAID;
+}
 
 function clampText(s: string | null | undefined, maxChars: number): string {
   const t = String(s ?? "").trim();
@@ -48,12 +58,21 @@ function clampText(s: string | null | undefined, maxChars: number): string {
   return t.slice(0, maxChars);
 }
 
-/** Gemini 出力トークン上限（コスト・暴走防止）。言い換えは元の長さを保つため多め。 */
+/** Gemini 出力トークン上限。無料 750 / 有料 900。 */
+const MAX_OUTPUT_TOKENS_FREE = 750;
+const MAX_OUTPUT_TOKENS_PAID = 900;
 const MAX_OUTPUT_TOKENS = {
-  lineStopper: 180,
-  reformulate: 280,
+  lineStopper: 900,
+  reformulate: 900,
   empathy: 220,
 } as const;
+
+function getMaxOutputTokensReformulate(plan: Plan): number {
+  return plan === "free" ? MAX_OUTPUT_TOKENS_FREE : MAX_OUTPUT_TOKENS_PAID;
+}
+function getMaxOutputTokensLineStopper(plan: Plan): number {
+  return plan === "free" ? MAX_OUTPUT_TOKENS_FREE : MAX_OUTPUT_TOKENS_PAID;
+}
 
 /**
  * ピン（必須）：Apple の中間 or ルート証明書の SHA256 を2本以上登録（ローテ対策）。
@@ -149,6 +168,34 @@ function resolvePlanFromOwnedProducts(owned: Set<string>): Plan {
   if (owned.has(ProductID.premiumYearly)) return "subscription_yearly";
   if (owned.has(ProductID.premiumMonthly)) return "subscription_monthly";
   return "free";
+}
+
+const FREE_TRIAL_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * 無料ユーザーは初回7日間のみ利用可。8日目以降は課金必須。
+ */
+async function assertFreeTrialOrPaid(uid: string, actualPlan: Plan): Promise<void> {
+  if (actualPlan !== "free") return;
+  const userRef = db.doc(`users/${uid}`);
+  const snap = await userRef.get();
+  const now = Date.now();
+  let createdAtMs: number;
+  if (!snap.exists) {
+    await userRef.set({ createdAt: FieldValue.serverTimestamp(), version: 1 }, { merge: true });
+    createdAtMs = now;
+  } else {
+    const data = snap.data() as { createdAt?: { toMillis?: () => number } } | undefined;
+    const created = data?.createdAt as { toMillis?: () => number } | undefined;
+    createdAtMs = created?.toMillis?.() ?? now;
+  }
+  if (now - createdAtMs > FREE_TRIAL_DAYS_MS) {
+    throw new HttpsError(
+      "failed-precondition",
+      "無料お試しは7日間までです。続けてご利用の場合はプレミアムをご検討ください。",
+      { code: "free_trial_ended" }
+    );
+  }
 }
 
 /**
@@ -430,10 +477,6 @@ export const enqueueLineStopper = onCall(
   { region: "asia-northeast1" },
   async (request) => {
     const uid = assertAuthed(request);
-
-    const text = clampText(request.data?.text, MAX_CHARS.lineStopper);
-    if (!text) throw new HttpsError("invalid-argument", "text is required");
-
     const { plan, effectiveUntil } = await getCurrentPlan(uid);
     let actualPlan: Plan = plan;
     if (plan === "subscription_monthly" || plan === "subscription_yearly") {
@@ -441,6 +484,12 @@ export const enqueueLineStopper = onCall(
         actualPlan = "free";
       }
     }
+    await assertFreeTrialOrPaid(uid, actualPlan);
+
+    const maxChars = getMaxCharsLineStopper(actualPlan);
+    const text = clampText(request.data?.text, maxChars);
+    logger.info("enqueueLineStopper.entry", { uid: uid.slice(0, 8), textLength: text?.length ?? 0 });
+    if (!text) throw new HttpsError("invalid-argument", "text is required");
 
     const limits = await consumeAiLimits(uid, actualPlan, "lineStopper");
     if (!limits.allowed) {
@@ -451,27 +500,11 @@ export const enqueueLineStopper = onCall(
 
     // 年額は同期で完了（キューをスキップ）
     if (actualPlan === "subscription_yearly") {
-      const apiKey = process.env.GEMINI_API_KEY;
-      if (!apiKey) {
-        logger.warn("GEMINI_API_KEY not set, yearly sync fallback");
-        const result = safeFallbackLineStopper(text);
-        return { status: "DONE", mode: "sync", queueTier, result, limits };
-      }
-      try {
-        const prompt = buildLineStopperPrompt(text);
-        const raw = await callGeminiText(prompt, apiKey, 0.2, MAX_OUTPUT_TOKENS.lineStopper);
-        const jsonStr = extractBraceBlock(raw) ?? raw.trim();
-        const obj = JSON.parse(jsonStr) as unknown;
-        const result = sanitizeAndForceLineStopper(obj);
-        return { status: "DONE", mode: "sync", queueTier, result, limits };
-      } catch (e) {
-        logger.error("yearly sync lineStopper failed", e);
-        const result = safeFallbackLineStopper(text);
-        return { status: "DONE", mode: "sync", queueTier, result, limits };
-      }
+      const result = await runLineStopperSync(text, actualPlan);
+      return { status: "DONE", mode: "sync", queueTier, result, limits };
     }
 
-    // それ以外は従来通り enqueue（jobs + tasks）
+    // それ以外は enqueue（jobs + tasks）。TASKS_OIDC_SERVICE_ACCOUNT 未設定時は同期フォールバック
     const jobRef = db.collection("jobs").doc();
     const jobId = jobRef.id;
 
@@ -488,9 +521,17 @@ export const enqueueLineStopper = onCall(
     try {
       taskName = await enqueueLineStopperJob({ jobId, uid, plan: actualPlan, text, queueTier });
     } catch (e) {
-      logger.error("enqueueLineStopperJob failed", e);
-      await jobRef.set({ status: "FAILED", error: "ENQUEUE_FAILED" }, { merge: true });
-      throw new HttpsError("internal", "enqueue failed");
+      logger.warn("enqueueLineStopperJob failed (e.g. TASKS_OIDC_SERVICE_ACCOUNT not set), falling back to sync", e);
+      const result = await runLineStopperSync(text, actualPlan);
+      await jobRef.set(
+        {
+          status: "DONE",
+          finishedAt: FieldValue.serverTimestamp(),
+          result: { ...result, queueTier },
+        },
+        { merge: true }
+      );
+      return { status: "DONE", mode: "sync", queueTier, result, limits };
     }
 
     await jobRef.set({ taskName }, { merge: true });
@@ -584,6 +625,7 @@ export const getJobResult = onCall(
   async (request) => {
     const uid = assertAuthed(request);
     const jobId = String(request.data?.jobId ?? "").trim();
+    logger.info("getJobResult.entry", { uid: uid.slice(0, 8), jobId: jobId.slice(0, 8) });
     if (!jobId) throw new HttpsError("invalid-argument", "jobId is required");
 
     const snap = await db.collection("jobs").doc(jobId).get();
@@ -674,6 +716,26 @@ function safeFallbackLineStopper(_input: string): LineStopperResponse {
   };
 }
 
+/** 危険度チェックを同期実行（Gemini 呼び出し or フォールバック）。年額・enqueue 失敗フォールバックで共通利用 */
+async function runLineStopperSync(text: string, plan: Plan = "free"): Promise<LineStopperResponse> {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    logger.warn("GEMINI_API_KEY not set, lineStopper fallback");
+    return safeFallbackLineStopper(text);
+  }
+  const maxOutputTokens = getMaxOutputTokensLineStopper(plan);
+  try {
+    const prompt = buildLineStopperPrompt(text);
+    const raw = await callGeminiText(prompt, apiKey, 0.2, maxOutputTokens);
+    const jsonStr = extractBraceBlock(raw) ?? raw.trim();
+    const obj = JSON.parse(jsonStr) as unknown;
+    return sanitizeAndForceLineStopper(obj);
+  } catch (e) {
+    logger.warn("runLineStopperSync failed", e);
+    return safeFallbackLineStopper(text);
+  }
+}
+
 function extractBraceBlock(raw: string): string | null {
   let inString = false;
   let escape = false;
@@ -737,21 +799,31 @@ function sanitizeAndForceLineStopper(jsonObj: unknown): LineStopperResponse {
   return { risk, oneLiner, suggestions: suggestions as { label: string; text: string }[] };
 }
 
-/** Gemini 汎用テキスト生成。maxOutputTokens は必須（渡し忘れ＝コンパイルエラーでコスト抜け穴を防ぐ） */
+type CallGeminiTextOptions = {
+  responseMimeType?: "text/plain" | "application/json";
+  responseSchema?: unknown;
+};
+
+/** Gemini 汎用テキスト生成。maxOutputTokens は必須。opts で JSON 出力・スキーマを指定可能。 */
 async function callGeminiText(
   prompt: string,
   apiKey: string,
   temperature: number,
-  maxOutputTokens: number
+  maxOutputTokens: number,
+  opts?: CallGeminiTextOptions
 ): Promise<string> {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
-  const body = {
+  const body: Record<string, unknown> = {
     contents: [{ role: "user", parts: [{ text: prompt }] }],
     generationConfig: {
       temperature,
       maxOutputTokens,
     },
   };
+
+  const genConfig = body.generationConfig as Record<string, unknown>;
+  if (opts?.responseMimeType) genConfig.responseMimeType = opts.responseMimeType;
+  if (opts?.responseSchema) genConfig.responseSchema = opts.responseSchema;
 
   const res = await fetch(url, {
     method: "POST",
@@ -987,12 +1059,14 @@ export const aiWorker = onRequest(
       const plan = decoded.plan ?? "free";
 
       if (op === "lineStopper") {
-        const clampedText = clampText(text, MAX_CHARS.lineStopper);
+        const maxChars = getMaxCharsLineStopper(plan as Plan);
+        const clampedText = clampText(text, maxChars);
+        const maxOutputTokens = getMaxOutputTokensLineStopper(plan as Plan);
         let result: LineStopperResponse = safeFallbackLineStopper("");
         if (apiKey) {
           try {
             const prompt = buildLineStopperPrompt(clampedText);
-            const raw = await callGeminiText(prompt, apiKey, 0.2, MAX_OUTPUT_TOKENS.lineStopper);
+            const raw = await callGeminiText(prompt, apiKey, 0.2, maxOutputTokens);
             const jsonStr = extractBraceBlock(raw) ?? raw.trim();
             const obj = JSON.parse(jsonStr) as unknown;
             result = sanitizeAndForceLineStopper(obj);
@@ -1026,7 +1100,10 @@ export const aiWorker = onRequest(
           { merge: true }
         );
       } else if (op === "rewrite") {
-        const clampedText = clampText(text, MAX_CHARS.reformulate);
+        const rewriteStartMs = Date.now();
+        const maxCharsReformulate = getMaxCharsReformulate(plan as Plan);
+        const clampedText = clampText(text, maxCharsReformulate);
+        logger.info("reformulate", { inputLength: clampedText.length });
         const ctx = decoded.context ?? {};
         const scene = String(ctx.scene ?? "仕事");
         const purpose = String(ctx.purpose ?? "気持ちを伝えたい");
@@ -1035,20 +1112,74 @@ export const aiWorker = onRequest(
         const isYearly = ctx.isYearly === true;
 
         let resultText = clampedText;
+        let rewriteFallback: ReformulateLogPayload["fallback"] = "none";
+        const maxOutputTokensReformulate = getMaxOutputTokensReformulate(plan as Plan);
         if (apiKey) {
           try {
-            const prompt = buildReformulatePrompt(clampedText, scene, purpose, audience, tone, isYearly);
-            const raw = await callGeminiText(prompt, apiKey, 0.3, MAX_OUTPUT_TOKENS.reformulate);
-            resultText = sanitizeReformulateResponse(raw) || clampedText;
+            const prompt = buildReformulatePromptV2({
+              scene,
+              purpose,
+              audience,
+              tone,
+              text: clampedText,
+              isYearly,
+            });
+            const raw = await callGeminiText(prompt, apiKey, 0.15, maxOutputTokensReformulate, {
+              responseMimeType: "application/json",
+              responseSchema: REFORMULATE_SCHEMA,
+            });
+            const jsonStr = extractBraceBlock(raw) ?? raw.trim();
+            const repaired = repairJSONString(jsonStr);
+            try {
+              const obj = JSON.parse(repaired) as ReformulateJson;
+              const rewritten =
+                typeof obj?.rewritten === "string" ? obj.rewritten.trim() : "";
+
+              if (rewritten) {
+                if (rewritten.length < 5) {
+                  logger.warn("rewrite too short", {
+                    rewritten,
+                    rawPreview: raw?.slice?.(0, 200),
+                  });
+                  resultText = clampedText;
+                  rewriteFallback = "empty_rewrite";
+                } else {
+                  resultText = stripWrappingQuotes(rewritten);
+                }
+              } else {
+                logger.warn("rewrite JSON parsed but empty rewritten", {
+                  rawPreview: raw?.slice?.(0, 200),
+                });
+                resultText = clampedText;
+                rewriteFallback = "empty_rewrite";
+              }
+            } catch {
+              resultText =
+                sanitizeReformulateResponse(raw) || clampedText;
+              rewriteFallback = "parse_fail";
+            }
           } catch (e) {
             logger.error("aiWorker rewrite failed", e);
+            rewriteFallback = "gemini_error";
           }
         }
+        const rewriteLatencyMs = Math.round(Date.now() - rewriteStartMs);
+        logReformulate({
+          source: "job",
+          op: "reformulate",
+          tier: queueTier,
+          plan,
+          fallback: rewriteFallback,
+          latencyMs: rewriteLatencyMs,
+          inputLength: clampedText.length,
+          outputLength: resultText.length,
+          jobId,
+        });
         await jobRef.set(
           {
             status: "DONE",
             finishedAt: FieldValue.serverTimestamp(),
-            result: { text: resultText },
+            result: { text: resultText, source: "job" },
           },
           { merge: true }
         );
@@ -1087,50 +1218,165 @@ export const aiWorker = onRequest(
   }
 );
 
-// --- 言い換え: Functions で Gemini を叩く（キーはサーバのみ） ---
+// --- 言い換え: Functions で Gemini を叩く（キーはサーバのみ・JSON 固定で精度安定） ---
 
-function buildReformulatePrompt(
-  text: string,
-  scene: string,
-  purpose: string,
-  audience: string,
-  tone: string,
-  isYearly?: boolean
-): string {
-  const premiumNote =
-    isYearly === true
-      ? "\n【優先】相手の立場や文脈を特に丁寧に汲み取り、一度で伝わるよう少しだけ踏み込んだ言い回しを選んでください。"
-      : "";
+type ReformulateParams = {
+  scene: string;
+  purpose: string;
+  audience: string;
+  tone: string;
+  text: string;
+  isYearly: boolean;
+};
+
+const REFORMULATE_SCHEMA = {
+  type: "object",
+  properties: {
+    critique: { type: "string" },
+    risks: { type: "array", items: { type: "string" } },
+    rewritten: { type: "string" },
+  },
+  required: ["critique", "risks", "rewritten"],
+} as const;
+
+type ReformulateJson = {
+  rewritten?: unknown;
+  critique?: unknown;
+  risks?: unknown;
+};
+
+function looksLikeJsonObject(s: string): boolean {
+  const t = s.trim();
+  return t.startsWith("{") && t.endsWith("}");
+}
+
+function stripWrappingQuotes(s: string): string {
+  let t = s.trim();
+  if (
+    (t.startsWith('"') && t.endsWith('"')) ||
+    (t.startsWith("「") && t.endsWith("」"))
+  ) {
+    t = t.slice(1, -1).trim();
+  }
+  return t;
+}
+
+function repairJSONString(s: string): string {
+  let t = s.trim();
+  const fence = /^```(?:json)?\s*\n?/i;
+  if (fence.test(t)) t = t.replace(fence, "").trim();
+  if (t.endsWith("```")) t = t.slice(0, -3).trim();
+  return t;
+}
+
+// --- 言い換えログ（経路・tier・fallback を同一フォーマットで観測用） ---
+type ReformulateLogPayload = {
+  source: "onCall" | "job";
+  op: "reformulate";
+  tier: "priority" | "standard";
+  plan: string;
+  used?: number;
+  limit?: number;
+  remaining?: number;
+  fallback: "none" | "parse_fail" | "gemini_error" | "empty_rewrite" | "timeout";
+  didRetry?: boolean;
+  latencyMs: number;
+  inputLength: number;
+  outputLength: number;
+  jobId?: string;
+};
+
+function logReformulate(payload: ReformulateLogPayload): void {
+  logger.info("reformulate.end", payload);
+}
+
+function buildReformulatePromptV2(p: ReformulateParams): string {
+  const scene = (p.scene ?? "").trim() || "不明";
+  const purpose = (p.purpose ?? "").trim() || "不明";
+  const audience = (p.audience ?? "").trim() || "不明";
+  const tone = (p.tone ?? "").trim() || "不明";
+  const text = (p.text ?? "").trim();
+
+  const yearlyExtra = p.isYearly
+    ? `- 年額ユーザー向け追加方針: 相手の立場/文脈を丁寧に汲み取り、"一度で伝わる"言い回しを選ぶ（ただし長文化しない）`
+    : `- 追加方針: 端的に、誤解を減らす`;
+
   return `
-以下の発言を「${scene}」の場面で自然に伝わる表現に言い換えてください。
+あなたは「送信前メッセージ編集者」です。
+ユーザーの本音は尊重しつつ、相手に伝わる形に"整える"のが仕事です。
+お世辞や慰めは不要。率直に、前提を疑い、盲点を指摘してください。
+ただし攻撃・人格批判・説教・決めつけは禁止。事実と推測を分け、冷静に。
 
-・相手に伝わる
-・誤解されない
-・無駄を省きつつ、必要な内容は残す
-${premiumNote}
+【文脈】
+- シーン: ${scene}
+- 目的: ${purpose}
+- 相手: ${audience}
+- トーン: ${tone}
+${yearlyExtra}
 
-【追加の指定】
-- 目的：${purpose}
-- 相手：${audience}
-- トーン：${tone}
-
-入力:
+【入力文】
 ${text}
 
-元の文の長さ・内容を保ちつつ、伝わりやすく整えてください。説明やラベルは不要です。文章のみを返してください。
+【作業手順】
+rewritten は critique の思想をそのまま繰り返さない。critique は分析。rewritten は実務用。
+1) critique: 相手が受け取る印象/盲点を率直に指摘（120文字以内）
+2) risks: 誤解・関係悪化のリスクを最大3つ（短い箇条書き文）
+3) rewritten: "そのまま送れる本文"を作成（最大6文、改行OK）
+   - 余計な前置きや講釈は書かない
+   - 詰問・断定・皮肉・脅しは禁止
+   - 相手に逃げ道を1つ入れる（例: 時間あるときでOK）
+
+【最重要：出力形式】
+JSONのみ。説明・前置き・コードフェンス禁止。
+キーは critique, risks, rewritten のみ。
 `.trim();
 }
 
+/**
+ * Reformulate の出力を安全に本文化。JSON なら rewritten を採用、否則は従来の prefix 削り（後方互換）。
+ */
 function sanitizeReformulateResponse(raw: string): string {
-  const prefixes = [
-    "整形した文章：", "整形した文章:", "言い換え：", "言い換え:", "回答：", "回答:", "「", "」",
-  ];
-  let out = raw.trim();
-  for (const p of prefixes) {
-    if (out.startsWith(p)) out = out.slice(p.length);
-    if (out.endsWith(p)) out = out.slice(0, -p.length);
+  const trimmed = (raw ?? "").trim();
+  if (!trimmed) return "";
+
+  const candidate =
+    extractBraceBlock(trimmed) ??
+    (trimmed.includes("{") && trimmed.includes("}") ? trimmed : null);
+
+  if (candidate) {
+    const maybeJson = repairJSONString(candidate);
+    if (looksLikeJsonObject(maybeJson)) {
+      try {
+        const obj = JSON.parse(maybeJson) as ReformulateJson;
+        const rewritten =
+          typeof obj.rewritten === "string" ? obj.rewritten.trim() : "";
+        if (rewritten) return stripWrappingQuotes(rewritten);
+      } catch {
+        // JSON として壊れている場合は後方互換へ
+      }
+    }
   }
-  return out.trim();
+
+  const prefixes = [
+    "整形した文章：",
+    "整形した文章:",
+    "言い換え：",
+    "言い換え:",
+    "回答：",
+    "回答:",
+  ];
+  let out = trimmed;
+  for (const p of prefixes) {
+    if (out.startsWith(p)) {
+      out = out.slice(p.length).trim();
+      break;
+    }
+  }
+  out = stripWrappingQuotes(out);
+  const final = out.trim();
+  // 生 JSON の断片を返さない（"{" 等で出力が壊れるのを防ぐ。呼び出し元で fallbackText || text により入力文にフォールバック）
+  if (final.startsWith("{") || (final.length <= 3 && final.includes("{"))) return "";
+  return final;
 }
 
 /**
@@ -1141,18 +1387,20 @@ export const reformulate = onCall(
   { region: "asia-northeast1" },
   async (request) => {
     const uid = assertAuthed(request);
-
-    const text = clampText(request.data?.text, MAX_CHARS.reformulate);
-    if (!text) {
-      throw new HttpsError("invalid-argument", "text required");
-    }
-
     const { plan, effectiveUntil } = await getCurrentPlan(uid);
     let actualPlan: Plan = plan;
     if (plan === "subscription_monthly" || plan === "subscription_yearly") {
       if (effectiveUntil == null || effectiveUntil === 0 || effectiveUntil < Date.now()) {
         actualPlan = "free";
       }
+    }
+    await assertFreeTrialOrPaid(uid, actualPlan);
+
+    const maxChars = getMaxCharsReformulate(actualPlan);
+    const text = clampText(request.data?.text, maxChars);
+    logger.info("reformulate.entry", { uid: uid.slice(0, 8), textLength: text?.length ?? 0 });
+    if (!text) {
+      throw new HttpsError("invalid-argument", "text required");
     }
 
     const limits = await consumeAiLimits(uid, actualPlan, "reformulate");
@@ -1172,14 +1420,123 @@ export const reformulate = onCall(
       throw new HttpsError("failed-precondition", "API key not configured on server.");
     }
 
+    logger.info("reformulate", { inputLength: text.length });
+    const startMs = Date.now();
     try {
-      const prompt = buildReformulatePrompt(text, scene, purpose, audience, tone, isYearly);
-      const raw = await callGeminiText(prompt, apiKey, 0.3, MAX_OUTPUT_TOKENS.reformulate);
-      const result = sanitizeReformulateResponse(raw);
-      return { text: result || text, queueTier: limits.tier, limits };
+      const prompt = buildReformulatePromptV2({
+        scene,
+        purpose,
+        audience,
+        tone,
+        text,
+        isYearly,
+      });
+      const maxOutputTokens = getMaxOutputTokensReformulate(actualPlan);
+      const raw = await callGeminiText(prompt, apiKey, 0.15, maxOutputTokens, {
+        responseMimeType: "application/json",
+        responseSchema: REFORMULATE_SCHEMA,
+      });
+
+      const jsonStr = extractBraceBlock(raw) ?? raw.trim();
+      const repaired = repairJSONString(jsonStr);
+
+      let obj: ReformulateJson & {
+        rewritten?: string;
+        critique?: string;
+        risks?: string[];
+      };
+      try {
+        obj = JSON.parse(repaired) as typeof obj;
+      } catch {
+        const fallbackText = sanitizeReformulateResponse(raw);
+        const outText = fallbackText || text;
+        logReformulate({
+          source: "onCall",
+          op: "reformulate",
+          tier: limits.tier,
+          plan: actualPlan,
+          used: limits.daily?.used,
+          limit: limits.daily?.limit,
+          remaining: limits.daily?.remaining,
+          fallback: "parse_fail",
+          latencyMs: Math.round(Date.now() - startMs),
+          inputLength: text.length,
+          outputLength: outText.length,
+        });
+        return {
+          text: outText,
+          meta: { critique: "", risks: [], source: "onCall" },
+          queueTier: limits.tier,
+          limits,
+        };
+      }
+
+      const rewritten =
+        typeof obj?.rewritten === "string" ? obj.rewritten.trim() : "";
+      const critique =
+        typeof obj?.critique === "string" ? obj.critique.trim() : "";
+      const risks = Array.isArray(obj?.risks)
+        ? (obj.risks as unknown[])
+            .filter((x): x is string => typeof x === "string")
+            .slice(0, 3)
+        : [];
+
+      let safeText: string;
+      let fallback: ReformulateLogPayload["fallback"] = "none";
+      if (rewritten) {
+        if (rewritten.length < 5) {
+          logger.warn("reformulate rewritten too short", {
+            rewritten,
+            rawPreview: raw?.slice?.(0, 200),
+          });
+          safeText = text;
+          fallback = "empty_rewrite";
+        } else {
+          safeText = stripWrappingQuotes(rewritten);
+        }
+      } else {
+        logger.warn("reformulate JSON parsed but empty rewritten", {
+          rawPreview: raw?.slice?.(0, 200),
+        });
+        safeText = text;
+        fallback = "empty_rewrite";
+      }
+
+      logReformulate({
+        source: "onCall",
+        op: "reformulate",
+        tier: limits.tier,
+        plan: actualPlan,
+        used: limits.daily?.used,
+        limit: limits.daily?.limit,
+        remaining: limits.daily?.remaining,
+        fallback,
+        latencyMs: Math.round(Date.now() - startMs),
+        inputLength: text.length,
+        outputLength: safeText.length,
+      });
+
+      return {
+        text: safeText,
+        meta: { critique, risks, source: "onCall" },
+        queueTier: limits.tier,
+        limits,
+      };
     } catch (e) {
       logger.warn("reformulate Gemini error", e);
-      // 失敗時も入力文を返し、クライアントで確実に何か表示されるようにする
+      logReformulate({
+        source: "onCall",
+        op: "reformulate",
+        tier: limits.tier,
+        plan: actualPlan,
+        used: limits.daily?.used,
+        limit: limits.daily?.limit,
+        remaining: limits.daily?.remaining,
+        fallback: "gemini_error",
+        latencyMs: Math.round(Date.now() - startMs),
+        inputLength: text.length,
+        outputLength: text.length,
+      });
       return { text: text, queueTier: limits.tier, limits, fallback: true };
     }
   }

@@ -178,6 +178,8 @@ final class GokigenViewModel: ObservableObject {
         static let dailyLimitReached = "本日の利用回数に達したため、簡易表示しています。"
         static let fallbackReformulation = "通信のため簡易表示しています。"
         static let reformulateRegenerateLimit = "この文章の再生成は2回までです。"
+        /// resource-exhausted / not-found / internal などサーバ要因は全てこの1文に統一
+        static let congestionMessage = "混雑中です。少し待つか、優先でチェックできます。"
     }
 
     /// 1日あたりの Gemini API 呼び出し上限（Phase 2）
@@ -631,7 +633,7 @@ final class GokigenViewModel: ObservableObject {
                         } else if quota.paywall, quota.reason == "quota_exceeded" {
                             PaywallCoordinator.shared.presentQuotaExceeded()
                         } else {
-                            self.publishError(message: "混雑中です。少し待ってからもう一度お試しください。")
+                            self.publishError(message: Copy.congestionMessage)
                             let tier: QueueTier =
                                 PremiumManager.shared.effectivePlan.serverPlanValue
                                     == "subscription_yearly" ? .priority : .standard
@@ -649,7 +651,7 @@ final class GokigenViewModel: ObservableObject {
                     } else if CongestionGateHandler.presentIfNeeded(
                         error: error, op: .empathy, payloadKey: trimmed)
                     {
-                        self.publishError(message: "混雑中です。少し待ってからもう一度お試しください。")
+                        self.publishError(message: Copy.congestionMessage)
                     } else {
                         self.publishError(message: "回数確認に失敗しました。通信状況を確認してください。")
                     }
@@ -681,7 +683,12 @@ final class GokigenViewModel: ObservableObject {
 
     @MainActor
     func reformulateText() {
-        let trimmed = InputLimit.clampText(draftText, maxChars: InputLimit.reformulate)
+        if PremiumManager.shared.isFreeTrialEnded {
+            PaywallCoordinator.shared.present()
+            return
+        }
+        let maxChars = InputLimit.maxCharsReformulate(isPremium: PremiumManager.shared.effectivePlan.isPremium)
+        let trimmed = InputLimit.clampText(draftText, maxChars: maxChars)
         guard !trimmed.isEmpty else {
             publishError(message: Copy.emptyDraft)
             return
@@ -774,7 +781,7 @@ final class GokigenViewModel: ObservableObject {
                         } else if quota.paywall, quota.reason == "quota_exceeded" {
                             PaywallCoordinator.shared.presentQuotaExceeded()
                         } else {
-                            self.publishError(message: "混雑中です。少し待ってからもう一度お試しください。")
+                            self.publishError(message: Copy.congestionMessage)
                             let tier: QueueTier =
                                 PremiumManager.shared.effectivePlan.serverPlanValue
                                     == "subscription_yearly" ? .priority : .standard
@@ -792,7 +799,7 @@ final class GokigenViewModel: ObservableObject {
                     } else if CongestionGateHandler.presentIfNeeded(
                         error: error, op: .reformulate, payloadKey: cacheKey)
                     {
-                        self.publishError(message: "混雑中です。少し待ってからもう一度お試しください。")
+                        self.publishError(message: Copy.congestionMessage)
                     } else {
                         self.publishError(message: "回数確認に失敗しました。通信状況を確認してください。")
                     }
@@ -805,26 +812,19 @@ final class GokigenViewModel: ObservableObject {
                     text: trimmed, context: context, cacheKey: cacheKey, token: token)
             } catch {
                 print("[Gemini] ERROR reformulateText: \(error)")
+                if FunctionsErrorExtraction.isFreeTrialEnded(error) {
+                    await MainActor.run { PaywallCoordinator.shared.present() }
+                    return
+                }
                 await MainActor.run {
                     guard self.reformulationRequestID == token.id else { return }
                     if CongestionGateHandler.presentIfNeeded(
                         error: error, op: .reformulate, payloadKey: cacheKey)
                     {
-                        self.publishError(message: "混雑中のため、言い換えに時間がかかっています。少し待ってからもう一度お試しください。")
+                        self.publishError(message: Copy.congestionMessage)
                         return
                     }
-                    let ns = error as NSError
-                    let isInternal = (error.localizedDescription.uppercased().contains("INTERNAL"))
-                        || (ns.domain == "FunctionsErrorDomain" && ns.code == 13)
-                    let isQuotaExhausted = QuotaService.isResourceExhausted(error)
-                    let errorMessage: String
-                    if isQuotaExhausted {
-                        errorMessage = "本日の回数を使い切りました。明日またお試しください。"
-                    } else if isInternal {
-                        errorMessage = "言い換えに失敗しました。しばらくしてからお試しください。"
-                    } else {
-                        errorMessage = Copy.fallbackReformulation
-                    }
+                    let errorMessage = Copy.congestionMessage
                     let fallback = EmpathyEngine.reformulateLocal(original: trimmed)
                     let textToShow =
                         fallback.isEmpty
@@ -851,14 +851,20 @@ final class GokigenViewModel: ObservableObject {
     private func performReformulate(
         text: String, context: ReformulationContext, cacheKey: String, token: AIRequestToken
     ) async throws {
-        let (reformulated, isFallback) = try await geminiService.reformulateText(for: text, context: context)
+        let (reformulated, isFallback, limitsPayload) = try await geminiService.reformulateText(
+            for: text, context: context)
         if Self.isInvalidReformulationResult(reformulated) {
-            throw NSError(domain: "GokigenViewModel", code: -1, userInfo: [NSLocalizedDescriptionKey: "言い換え結果が取得できませんでした。"])
+            throw NSError(
+                domain: "GokigenViewModel", code: -1,
+                userInfo: [NSLocalizedDescriptionKey: "言い換え結果が取得できませんでした。"])
         }
         await MainActor.run {
             guard self.reformulationRequestID == token.id else { return }
             self.reformulatedText = reformulated
             self.setReformulationCache(cacheKey: cacheKey, result: reformulated)
+            if let limits = limitsPayload {
+                PremiumManager.shared.applyServerQuotaFromLimits(limits)
+            }
             if isFallback {
                 self.publishError(message: "通信の都合で入力文をそのまま表示しています。しばらくして再度お試しください。")
             } else if !self.hasShownFirstReformulationSuccess {
@@ -884,9 +890,9 @@ final class GokigenViewModel: ObservableObject {
             if CongestionGateHandler.presentIfNeeded(
                 error: error, op: .reformulate, payloadKey: pending.cacheKey)
             {
-                publishError(message: "混雑中です。少し待ってからもう一度お試しください。")
+                publishError(message: Copy.congestionMessage)
             } else {
-                publishError(message: "言い換えに失敗しました。もう一度お試しください。")
+                publishError(message: Copy.congestionMessage)
             }
         }
     }

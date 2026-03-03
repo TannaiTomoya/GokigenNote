@@ -36,8 +36,8 @@ final class LineStopperRemoteService: ObservableObject {
         lastQueueTier = .standard
     }
 
-    /// enqueue → 年額なら即 DONE 返却、それ以外は jobId でポーリング。
-    func check(text: String) async throws -> LineStopperRemoteResult {
+    /// enqueue → 年額なら即 DONE 返却、それ以外は jobId でポーリング。返り値の limits は UI の「あと○回」同期用。
+    func check(text: String) async throws -> (result: LineStopperRemoteResult, limitsPayload: [String: Any]?) {
         progress = .waiting(seconds: 0)
 
         let enqueueCallable = functions.httpsCallable("enqueueLineStopper")
@@ -51,11 +51,12 @@ final class LineStopperRemoteService: ObservableObject {
         }
         let tier = QueueTier(rawValue: queueTierRaw) ?? .standard
         lastQueueTier = tier
+        let limitsPayload = data["limits"] as? [String: Any]
 
         // 年額同期: status == "DONE" で result が返っている → ポーリング不要
         if status == "DONE", let result = data["result"] as? [String: Any] {
             progress = .done
-            return parseResult(result, queueTier: tier)
+            return (parseResult(result, queueTier: tier), limitsPayload)
         }
 
         // キュー投入済み: jobId でポーリング
@@ -95,9 +96,9 @@ final class LineStopperRemoteService: ObservableObject {
             case "DONE":
                 progress = .done
                 guard let result = resultData["result"] as? [String: Any] else {
-                    return parseResult([:], queueTier: jobTier)
+                    return (parseResult([:], queueTier: jobTier), limitsPayload)
                 }
-                return parseResult(result, queueTier: jobTier)
+                return (parseResult(result, queueTier: jobTier), limitsPayload)
             case "FAILED":
                 progress = .idle
                 let errorMsg = (resultData["error"] as? String) ?? "Job failed"

@@ -115,7 +115,12 @@ final class LineStopperViewModel: ObservableObject {
         hasCancelledWaiting = false
         lastCheckId = nil
 
-        let trimmed = InputLimit.clampText(inputText, maxChars: InputLimit.lineStopper)
+        if PremiumManager.shared.isFreeTrialEnded {
+            shouldShowPaywall = true
+            return
+        }
+        let maxChars = InputLimit.maxCharsLineStopper(isPremium: PremiumManager.shared.effectivePlan.isPremium)
+        let trimmed = InputLimit.clampText(inputText, maxChars: maxChars)
         guard !trimmed.isEmpty else {
             errorMessage = "LINE文を貼り付けてください。"
             return
@@ -130,10 +135,14 @@ final class LineStopperViewModel: ObservableObject {
         }
 
         do {
-            let (riskRaw, oneLiner, suggestionTuples, queueTier) = try await GeminiService.shared
+            let (riskRaw, oneLiner, suggestionTuples, queueTier, limitsPayload) = try await GeminiService.shared
                 .generateLineStopperResult(text: trimmed)
 
             if hasCancelledWaiting { return }
+
+            if let limits = limitsPayload {
+                PremiumManager.shared.applyServerQuotaFromLimits(limits)
+            }
 
             let mappedRisk: LineStopperRisk
             switch riskRaw.uppercased() {
@@ -170,6 +179,10 @@ final class LineStopperViewModel: ObservableObject {
             }
         } catch {
             if hasCancelledWaiting { return }
+            if FunctionsErrorExtraction.isFreeTrialEnded(error) {
+                shouldShowPaywall = true
+                return
+            }
             if CongestionGateHandler.presentIfNeeded(
                 error: error, op: .lineStopper, payloadKey: trimmed)
             {
@@ -180,16 +193,17 @@ final class LineStopperViewModel: ObservableObject {
             } else {
                 let raw = error.localizedDescription
                 let ns = error as NSError
-                let isInternal = raw.uppercased().contains("INTERNAL")
+                let isInternal =
+                    raw.uppercased().contains("INTERNAL")
                     || (ns.domain == "FunctionsErrorDomain" && ns.code == 13)
                 if raw.contains("NOT FOUND") || raw.lowercased().contains("not found")
                     || raw.contains("404") || isInternal
                 {
-                    errorMessage = "危険度チェックは一時的に利用できません。しばらくしてからお試しください。"
+                    errorMessage = "混雑中です。少し待つか、優先でチェックできます。"
                 } else if QuotaService.isResourceExhausted(error) {
-                    errorMessage = "本日の回数を使い切りました。明日またお試しください。"
+                    errorMessage = "混雑中です。少し待つか、優先でチェックできます。"
                 } else {
-                    errorMessage = raw
+                    errorMessage = "混雑中です。少し待つか、優先でチェックできます。"
                 }
             }
         }
@@ -325,7 +339,7 @@ struct LineStopperInputView: View {
                                 .padding(.vertical, 20)
                         }
                     }
-                Text("入力は最大\(InputLimit.lineStopper)文字までです。長文は「要点だけ」残して貼ってください。")
+                Text("入力は最大\(InputLimit.maxCharsLineStopper(isPremium: PremiumManager.shared.effectivePlan.isPremium))文字までです。長文は「要点だけ」残して貼ってください。")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
 

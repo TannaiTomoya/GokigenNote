@@ -385,7 +385,7 @@ struct TodayView: View {
                                 .stroke(Color(.separator), lineWidth: 0.5)
                         )
                 }
-                Text("入力は言い換え\(InputLimit.reformulate)文字・共感\(InputLimit.empathy)文字まで。長文は要点だけ残して貼ってください。")
+                Text("入力は言い換え\(InputLimit.maxCharsReformulate(isPremium: premium.effectivePlan.isPremium))文字・共感\(InputLimit.empathy)文字まで。長文は要点だけ残して貼ってください。")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }

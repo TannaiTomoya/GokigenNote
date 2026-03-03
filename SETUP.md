@@ -114,9 +114,15 @@ cp Gemini-Info.plist.example Gemini-Info.plist
 
 1. [Firebase Console](https://console.firebase.google.com/) → プロジェクト → **Functions** → **環境変数**（または Cloud Functions の設定）
 2. **GEMINI_API_KEY** を追加し、Gemini API キーを設定
-3. プロジェクトルートで `firebase deploy --only functions` を実行（`lineStopper` と `reformulate` がデプロイされます）
+3. プロジェクトルートで `firebase deploy --only functions` を実行（`reformulate`・`enqueueLineStopper`・`getJobResult` 等がデプロイされます）
 
 未設定の場合は lineStopper はフォールバック応答を返します（アプリは落ちません）。
+
+**デプロイ後の確認**
+
+- **Functions 一覧**: Firebase Console → Functions → リージョン **asia-northeast1** に `reformulate` / `enqueueLineStopper` / `getJobResult` が表示されることを確認
+- **ログで呼び出し確認**: Console → Functions → ログで、言い換え実行時に `reformulate.entry`、危険度実行時に `enqueueLineStopper.entry`（非年額の場合は続けて `getJobResult.entry`）が出力されることを確認
+- **「本日あと○回」**: 言い換えと危険度は**共通の日次枠**。言い換えのみ・危険度のみ・両方使ったとき、表示が同じ枠として減ることを確認（両方の成功時に `applyServerQuotaFromLimits` で同期）
 
 ---
 

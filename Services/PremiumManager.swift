@@ -7,6 +7,7 @@
 //
 
 import Combine
+import FirebaseAuth
 import FirebaseFunctions
 import Foundation
 import OSLog
@@ -88,11 +89,11 @@ extension Plan {
         return false
     }
 
-    /// 回数制限。nil = 無制限
+    /// 回数制限。nil = 無制限。Lifetime はサーバーと揃えて 60/日。
     var rewriteLimit: Int? {
         switch self {
         case .free: return 10
-        case .lifetime: return 200
+        case .lifetime: return 60
         case .subscription: return nil
         }
     }
@@ -100,7 +101,7 @@ extension Plan {
     var description: String {
         switch self {
         case .free: return "初日20回・2日目以降10回まで"
-        case .lifetime: return "月200回まで利用可能"
+        case .lifetime: return "1日60回まで利用可能"
         case .subscription: return "無制限で利用可能"
         }
     }
@@ -158,7 +159,8 @@ enum EntitlementRefreshMode: Equatable {
 
 enum UsageLimit {
     static let freePerDay = 10
-    static let lifetimePerMonth = 200
+    /// サーバー rateLimit.ts の DAILY_BUDGET_LIMITS.lifetime と一致
+    static let lifetimePerDay = 60
 }
 
 // 日付キー生成は「locale/timezoneのブレ」を消す（地雷：端末設定差で日付キーがズレる）
@@ -653,14 +655,17 @@ extension PremiumManager {
         entitlementsLoaded ? plan : cachedPlan
     }
 
+    /// 無料かつアカウント作成から7日超なら true（言い換え・危険度をブロックしてペイウォール表示用）
+    var isFreeTrialEnded: Bool {
+        guard effectivePlan.isPremium == false else { return false }
+        guard let created = Auth.auth().currentUser?.metadata.creationDate else { return false }
+        return Date().timeIntervalSince(created) > 7 * 24 * 3600
+    }
+
     private var defaults: UserDefaults { .standard }
 
     private func dayQuotaKey(_ date: Date = .now) -> String {
         "quota.rewrite.day.\(currentUserId ?? "guest").\(UsageKey.dayKey(date))"
-    }
-
-    private func monthQuotaKey(_ date: Date = .now) -> String {
-        "quota.rewrite.month.\(currentUserId ?? "guest").\(UsageKey.monthKey(date))"
     }
 
     /// 共通枠（言い換え/共感生成の合算）を使えるか。plan 単一の真実
@@ -674,7 +679,7 @@ extension PremiumManager {
             let used = defaults.integer(forKey: dayQuotaKey(now))
             return used < limit
         case .lifetime:
-            let used = defaults.integer(forKey: monthQuotaKey(now))
+            let used = defaults.integer(forKey: dayQuotaKey(now))
             return used < limit
         case .subscription:
             return true
@@ -693,7 +698,7 @@ extension PremiumManager {
             let key = dayQuotaKey(now)
             defaults.set(defaults.integer(forKey: key) + 1, forKey: key)
         case .lifetime:
-            let key = monthQuotaKey(now)
+            let key = dayQuotaKey(now)
             defaults.set(defaults.integer(forKey: key) + 1, forKey: key)
         }
     }
@@ -708,10 +713,37 @@ extension PremiumManager {
         case .free:
             defaults.set(used, forKey: "quota.rewrite.day.\(uid).\(resetKey)")
         case .lifetime:
-            defaults.set(used, forKey: "quota.rewrite.month.\(uid).\(resetKey)")
+            defaults.set(used, forKey: "quota.rewrite.day.\(uid).\(resetKey)")
         case .subscription:
             break
         }
+    }
+
+    /// CF返却の limits（daily 入り）から表示用残りを同期。言い換え・危険度チェック成功後に呼ぶ。
+    /// サーバーは共通枠（言い換え・危険度で同じ dailyUsed）なので、どちらから返っても同じ lastServerQuota を更新する。
+    @MainActor
+    func applyServerQuotaFromLimits(_ limitsDict: [String: Any]) {
+        guard let daily = limitsDict["daily"] as? [String: Any],
+              let limit = Self.intFromAny(daily["limit"]), limit > 0,
+              let used = Self.intFromAny(daily["used"]), used >= 0,
+              let remaining = Self.intFromAny(daily["remaining"]), remaining >= 0 else { return }
+        let resetAtMsVal = daily["resetAtMs"]
+        let resetKey: String = {
+            if let i = resetAtMsVal as? Int { return "\(i)" }
+            if let d = resetAtMsVal as? Double { return "\(Int(d))" }
+            if let n = resetAtMsVal as? NSNumber { return "\(n.intValue)" }
+            return ""
+        }()
+        guard !resetKey.isEmpty else { return }
+        applyServerQuota(used: used, remaining: remaining, limit: limit, resetKey: resetKey)
+    }
+
+    /// Firebase Callable の JSON では数値が Int/Double/NSNumber で来ることがあるため共通で Int に変換
+    private static func intFromAny(_ value: Any?) -> Int? {
+        if let i = value as? Int { return i }
+        if let d = value as? Double { return Int(d) }
+        if let n = value as? NSNumber { return n.intValue }
+        return nil
     }
 
     /// 表示用（共通枠の残り）。サーバー結果を優先し、なければローカル。
@@ -720,7 +752,7 @@ extension PremiumManager {
         guard let limit = p.rewriteLimit else { return "無制限" }
 
         if let q = lastServerQuota, q.limit == limit {
-            return p == .free ? "本日あと\(max(0, q.remaining))回" : "今月あと\(max(0, q.remaining))回"
+            return "本日あと\(max(0, q.remaining))回"
         }
 
         switch p {
@@ -729,9 +761,9 @@ extension PremiumManager {
             let left = max(0, limit - used)
             return "本日あと\(left)回"
         case .lifetime:
-            let used = defaults.integer(forKey: monthQuotaKey())
+            let used = defaults.integer(forKey: dayQuotaKey())
             let left = max(0, limit - used)
-            return "今月あと\(left)回"
+            return "本日あと\(left)回"
         case .subscription:
             return "無制限"
         }

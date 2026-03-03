@@ -36,6 +36,13 @@ export type EnqueueAiJobParams = {
   context?: Record<string, unknown>;
 };
 
+/** 同一プロジェクトの aiWorker URL。WORKER_URL 未設定時は GCP の project/location から導出 */
+function getWorkerUrl(project: string, location: string): string {
+  const explicit = process.env.WORKER_URL;
+  if (explicit) return explicit;
+  return `https://${location}-${project}.cloudfunctions.net/aiWorker`;
+}
+
 async function enqueueAiJobInternal(params: EnqueueAiJobParams): Promise<string> {
   const project = process.env.GCLOUD_PROJECT || process.env.CLOUD_TASKS_PROJECT || (await client.getProjectId());
   const location = process.env.CLOUD_TASKS_LOCATION || "asia-northeast1";
@@ -43,8 +50,7 @@ async function enqueueAiJobInternal(params: EnqueueAiJobParams): Promise<string>
 
   const parent = client.queuePath(project, location, queue);
 
-  const workerUrl = process.env.WORKER_URL;
-  if (!workerUrl) throw new Error("WORKER_URL is not set");
+  const workerUrl = getWorkerUrl(project, location);
 
   const serviceAccountEmail = process.env.TASKS_OIDC_SERVICE_ACCOUNT;
   if (!serviceAccountEmail) throw new Error("TASKS_OIDC_SERVICE_ACCOUNT is not set");

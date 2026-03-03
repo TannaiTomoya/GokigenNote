@@ -162,28 +162,28 @@ final class GeminiService {
         }
     }
 
-    /// 言い換え: Functions の reformulate を呼ぶ（キーはサーバ側のみ・アプリに渡さない）
-    func reformulateText(for text: String, context: ReformulationContext) async throws -> (result: String, isFallback: Bool) {
+    /// 言い換え: Functions の reformulate を呼ぶ（キーはサーバ側のみ・アプリに渡さない）。limitsPayload は UI の「あと○回」同期用。
+    func reformulateText(for text: String, context: ReformulationContext) async throws -> (result: String, isFallback: Bool, limitsPayload: [String: Any]?) {
         logger.info("Requesting text reformulation via Functions...")
         let tuple = try await ReformulateRemoteService.shared.reformulate(text: text, context: context)
         logger.info("Text reformulation completed.")
         return tuple
     }
 
-    /// 地雷LINEストッパー: キャッシュ → レート制限（補助輪）→ Functions lineStopper 呼び出し（キー・RPM はサーバ）。返却に queueTier を含む。
-    func generateLineStopperResult(text: String) async throws -> (riskRaw: String, oneLiner: String, suggestions: [(label: String, text: String)], queueTier: String) {
+    /// 地雷LINEストッパー: キャッシュ → レート制限（補助輪）→ Functions lineStopper 呼び出し（キー・RPM はサーバ）。返却に queueTier を含む。limitsPayload は UI の「あと○回」同期用（キャッシュヒット時は nil）。
+    func generateLineStopperResult(text: String) async throws -> (riskRaw: String, oneLiner: String, suggestions: [(label: String, text: String)], queueTier: String, limitsPayload: [String: Any]?) {
         let key = makeLineStopperCacheKey(text)
         if let cached = await lineStopperCache.get(key) {
-            return cached.value
+            return (cached.value.0, cached.value.1, cached.value.2, cached.value.3, nil)
         }
 
         await lineStopperLimiter.acquire()
         do {
-            let remote = try await LineStopperRemoteService.shared.check(text: text)
+            let (remote, limitsPayload) = try await LineStopperRemoteService.shared.check(text: text)
             let result = (remote.riskRaw, remote.oneLiner, remote.suggestions, remote.queueTier.rawValue)
             await lineStopperCache.set(key, .init(value: result, createdAt: Date()))
             await lineStopperLimiter.release()
-            return result
+            return (remote.riskRaw, remote.oneLiner, remote.suggestions, remote.queueTier.rawValue, limitsPayload)
         } catch {
             await lineStopperLimiter.release()
             throw error
